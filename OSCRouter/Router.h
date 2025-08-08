@@ -182,6 +182,18 @@ public:
   };
   typedef std::vector<sRecvPacket> RECV_Q;
 
+  struct sRecvPortPacket
+  {
+    sRecvPortPacket(uint16_t Port, const char *data, int size, unsigned int Ip)
+      : port(Port)
+      , p(data, size, Ip)
+    {
+    }
+    uint16_t port;
+    sRecvPacket p;
+  };
+  typedef std::vector<sRecvPortPacket> RECV_PORT_Q;
+
   EosUdpInThread();
   virtual ~EosUdpInThread();
 
@@ -395,15 +407,13 @@ protected:
   struct Universe
   {
     uint8_t priority = 0;
+    unsigned int ip = 0;
     bool hasPerChannelPriority = false;
     std::array<uint8_t, UNIVERSE_SIZE> dmx;
     std::array<uint8_t, UNIVERSE_SIZE> channelPriority;
+    std::array<unsigned int, UNIVERSE_SIZE> channelIp;
 
-    Universe()
-    {
-      dmx.fill(0);
-      channelPriority.fill(0);
-    }
+    Universe() { dmx.fill(0); }
   };
 
   typedef std::map<uint16_t, Universe> UNIVERSE_LIST;
@@ -447,7 +457,7 @@ protected:
   sACNRecv m_sACNRecv;
 
   virtual void run();
-  virtual void RecvsACN(sACN &sacn);
+  virtual void RecvsACN(sACN &sacn, EosUdpInThread::RECV_PORT_Q &recvPortQ);
   virtual void BuildRoutes(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &routesBysACNUniverse, UDP_IN_THREADS &udpInThreads, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads,
                            TCP_SERVER_THREADS &tcpServerThreads);
   virtual void BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &routesBysACNUniverse, sACN &sacn);
@@ -456,12 +466,12 @@ protected:
   virtual void ProcessRecvQ(OSCParser &oscBundleParser, ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads,
                             const EosAddr &addr, EosUdpInThread::RECV_Q &recvQ);
   virtual void ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads, const EosAddr &addr,
-                                 bool isOSC, EosUdpInThread::sRecvPacket &recvPacket);
-  virtual bool MakeOSCPacket(const QString &srcPath, const EosRouteDst &dst, OSCArgument *args, size_t argsCount, EosPacket &packet);
+                                 Protocol protocol, EosUdpInThread::sRecvPacket &recvPacket);
+  virtual bool MakeOSCPacket(const EosAddr &addr, Protocol protocol, const QString &srcPath, const EosRouteDst &dst, OSCArgument *args, size_t argsCount, EosPacket &packet);
   virtual bool MakePSNPacket(EosPacket &osc, EosPacket &psn);
   virtual void ProcessTcpConnectionQ(TCP_CLIENT_THREADS &tcpClientThreads, OSCStream::EnumFrameMode frameMode, EosTcpServerThread::CONNECTION_Q &tcpConnectionQ);
   virtual bool ApplyTransform(OSCArgument &arg, const EosRouteDst &dst, OSCPacketWriter &packet);
-  virtual void MakeSendPath(const QString &srcPath, const QString &dstPath, const OSCArgument *args, size_t argsCount, QString &sendPath);
+  virtual void MakeSendPath(const EosAddr &addr, Protocol protocol, const QString &srcPath, const QString &dstPath, const OSCArgument *args, size_t argsCount, QString &sendPath);
   virtual void UpdateLog();
   virtual void SetItemState(ItemStateTable::ID id, ItemState::EnumState state);
   virtual void SetItemState(const ROUTES_BY_IP &routesByIp, ItemState::EnumState state);

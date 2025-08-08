@@ -1411,13 +1411,13 @@ void RouterThread::ProcessRecvQ(OSCParser &oscBundleParser, ROUTES_BY_PORT &rout
       if (!bundleQ.empty())
       {
         for (EosUdpInThread::RECV_Q::iterator j = bundleQ.begin(); j != bundleQ.end(); j++)
-          ProcessRecvPacket(routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, addr, /*isOSC*/ true, *j);
+          ProcessRecvPacket(routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, addr, Protocol::kOSC, *j);
 
         continue;
       }
     }
 
-    ProcessRecvPacket(routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, addr, /*isOSC*/ false, recvPacket);
+    ProcessRecvPacket(routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, addr, Protocol::kInvalid, recvPacket);
   }
   recvQ.clear();
 }
@@ -1425,7 +1425,7 @@ void RouterThread::ProcessRecvQ(OSCParser &oscBundleParser, ROUTES_BY_PORT &rout
 ////////////////////////////////////////////////////////////////////////////////
 
 void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads, const EosAddr &addr,
-                                     bool isOSC, EosUdpInThread::sRecvPacket &recvPacket)
+                                     Protocol protocol, EosUdpInThread::sRecvPacket &recvPacket)
 {
   routingDestinationList.clear();
 
@@ -1434,7 +1434,7 @@ void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_
   size_t packetSize = ((recvPacket.packet.GetSize() > 0) ? static_cast<size_t>(recvPacket.packet.GetSize()) : 0);
   QString path;
 
-  if (isOSC)
+  if (protocol == Protocol::kOSC)
   {
     // get OSC path
     for (size_t i = 0; i < packetSize; i++)
@@ -1457,14 +1457,14 @@ void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_
     // send to matching ips
     ROUTES_BY_IP::const_iterator ipIter = routesByIp.find(recvPacket.ip);
     if (ipIter != routesByIp.end())
-      AddRoutingDestinations(isOSC, path, ipIter->second, routingDestinationList);
+      AddRoutingDestinations(protocol == Protocol::kOSC, path, ipIter->second, routingDestinationList);
 
     // send to unspecified ips
     if (recvPacket.ip != 0)
     {
       ipIter = routesByIp.find(0);
       if (ipIter != routesByIp.end())
-        AddRoutingDestinations(isOSC, path, ipIter->second, routingDestinationList);
+        AddRoutingDestinations(protocol == Protocol::kOSC, path, ipIter->second, routingDestinationList);
     }
   }
 
@@ -1472,7 +1472,7 @@ void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_
   {
     size_t argsCount = 0;
     OSCArgument *args = 0;
-    if (isOSC)
+    if (protocol == Protocol::kOSC)
     {
       argsCount = 0xffffffff;
       args = OSCArgument::GetArgs(buf, packetSize, argsCount);
@@ -1494,10 +1494,10 @@ void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_
         if (k != tcpClientThreads.end())
         {
           EosTcpClientThread *thread = k->second;
-          if (isOSC)
+          if (protocol == Protocol::kOSC || protocol == Protocol::ksACN)
           {
             EosPacket packet;
-            if (MakeOSCPacket(path, routeDst.dst, args, argsCount, packet) && thread->SendFramed(packet))
+            if (MakeOSCPacket(addr, protocol, path, routeDst.dst, args, argsCount, packet) && thread->SendFramed(packet))
             {
               SetItemActivity(routeDst.srcItemStateTableId);
               SetItemActivity(thread->GetItemStateTableId());
@@ -1514,10 +1514,10 @@ void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_
           EosUdpOutThread *thread = CreateUdpOutThread(dstAddr, routeDst.dstItemStateTableId, udpOutThreads);
           if (thread)
           {
-            if (isOSC)
+            if (protocol == Protocol::kOSC || protocol == Protocol::ksACN)
             {
               EosPacket oscPacket;
-              if (MakeOSCPacket(path, routeDst.dst, args, argsCount, oscPacket))
+              if (MakeOSCPacket(addr, protocol, path, routeDst.dst, args, argsCount, oscPacket))
               {
                 bool sent = false;
                 if (routeDst.dst.protocol == Protocol::kPSN)
@@ -1555,11 +1555,12 @@ void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_
 
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RouterThread::MakeOSCPacket(const QString &srcPath, const EosRouteDst &dst, OSCArgument *args, size_t argsCount, EosPacket &packet)
+bool RouterThread::MakeOSCPacket(const EosAddr &addr, Protocol protocol, const QString &srcPath, const EosRouteDst &dst, OSCArgument *args, size_t argsCount, EosPacket &packet)
 {
   QString sendPath;
   if (dst.script)
   {
+    // TODO: handle Protocol::ksACN
     QString error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, args, argsCount, &packet);
     if (error.isEmpty())
       return true;
@@ -1568,7 +1569,7 @@ bool RouterThread::MakeOSCPacket(const QString &srcPath, const EosRouteDst &dst,
     return false;
   }
 
-  MakeSendPath(srcPath, dst.path, args, argsCount, sendPath);
+  MakeSendPath(addr, protocol, srcPath, dst.path, args, argsCount, sendPath);
   if (!sendPath.isEmpty())
   {
     size_t oscPacketSize = 0;
@@ -1601,18 +1602,21 @@ bool RouterThread::MakeOSCPacket(const QString &srcPath, const EosRouteDst &dst,
     {
       OSCPacketWriter oscPacket(sendPath.toUtf8().constData());
 
-      if (dst.hasAnyTransforms())
+      if (protocol != Protocol::ksACN)
       {
-        if (args && argsCount != 0)
+        if (dst.hasAnyTransforms())
         {
-          if (!ApplyTransform(args[0], dst, oscPacket))
+          if (args && argsCount != 0)
+          {
+            if (!ApplyTransform(args[0], dst, oscPacket))
+              return false;
+          }
+          else
             return false;
         }
         else
-          return false;
+          oscPacket.AddOSCArgList(args, argsCount);
       }
-      else
-        oscPacket.AddOSCArgList(args, argsCount);
 
       oscPacketData = oscPacket.Create(oscPacketSize);
     }
@@ -1819,7 +1823,7 @@ bool RouterThread::ApplyTransform(OSCArgument &arg, const EosRouteDst &dst, OSCP
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void RouterThread::MakeSendPath(const QString &srcPath, const QString &dstPath, const OSCArgument *args, size_t argsCount, QString &sendPath)
+void RouterThread::MakeSendPath(const EosAddr &addr, Protocol protocol, const QString &srcPath, const QString &dstPath, const OSCArgument *args, size_t argsCount, QString &sendPath)
 {
   if (dstPath.isEmpty())
   {
@@ -1829,7 +1833,7 @@ void RouterThread::MakeSendPath(const QString &srcPath, const QString &dstPath, 
   {
     sendPath = dstPath;
 
-    if (!srcPath.isEmpty() && dstPath.contains('%'))
+    if (dstPath.contains('%'))
     {
       // possible in-line path replacements:
       // %1  => srcPath[0]
@@ -1866,7 +1870,9 @@ void RouterThread::MakeSendPath(const QString &srcPath, const QString &dstPath, 
             {
               // %xxx => srcPath[xxx-1]
 
-              int srcPathIndex = (sendPath.mid(startIndex + 1, digitCount).toInt() - 1);
+              int srcPathIndex = sendPath.mid(startIndex + 1, digitCount).toInt();
+              if (!srcPath.isEmpty())
+                --srcPathIndex;
 
               if (!srcPathPartsInitialized)
               {
@@ -1881,7 +1887,23 @@ void RouterThread::MakeSendPath(const QString &srcPath, const QString &dstPath, 
               {
                 if (srcPathIndex >= srcPathParts.size())
                 {
-                  if (args)
+                  if (protocol == Protocol::ksACN)
+                  {
+                    srcPathIndex -= srcPathParts.size();
+                    uint8_t value = 0;
+
+                    QMutexLocker locker(&m_sACNRecv.mutex);
+                    UNIVERSE_LIST::const_iterator universeIter = m_sACNRecv.merged.find(addr.port);
+                    if (universeIter != m_sACNRecv.merged.end())
+                    {
+                      const Universe &universe = universeIter->second;
+                      if (srcPathIndex >= 0 && static_cast<size_t>(srcPathIndex) < universe.dmx.size())
+                        value = universe.dmx[srcPathIndex];
+                    }
+
+                    insertStr = QString::number(static_cast<ushort>(value));
+                  }
+                  else if (args)
                   {
                     srcPathIndex -= srcPathParts.size();
                     if (srcPathIndex >= 0 && static_cast<size_t>(srcPathIndex) < argsCount)
@@ -1898,7 +1920,7 @@ void RouterThread::MakeSendPath(const QString &srcPath, const QString &dstPath, 
 
               if (insertStr.isEmpty())
               {
-                QString msg = QString("Unable to remap %1 => %2, invlaid replacement index %3").arg(srcPath).arg(dstPath).arg(srcPathIndex + 1);
+                QString msg = QString("Unable to remap %1 => %2, invalid replacement index %3").arg(srcPath).arg(dstPath).arg(srcPathIndex + 1);
                 m_PrivateLog.AddWarning(msg.toUtf8().constData());
                 sendPath.clear();
                 return;
@@ -2004,6 +2026,7 @@ void RouterThread::run()
   ROUTES_BY_PORT routesByPort;
   ROUTES_BY_PORT routesBysACNUniverse;
   DESTINATIONS_LIST routingDestinationList;
+  EosUdpInThread::RECV_PORT_Q sACNRecvQ;
   EosUdpInThread::RECV_Q recvQ;
   EosTcpServerThread::CONNECTION_Q tcpConnectionQ;
   EosLog::LOG_Q tempLogQ;
@@ -2018,6 +2041,18 @@ void RouterThread::run()
 
   while (m_Run)
   {
+    // sACN input
+    RecvsACN(sacn, sACNRecvQ);
+
+    EosAddr sACNAddr;
+    for (size_t i = 0; i < sACNRecvQ.size(); ++i)
+    {
+      EosUdpInThread::sRecvPortPacket &sACNPacket = sACNRecvQ[i];
+      sACNAddr.fromUInt(sACNPacket.p.ip);
+      sACNAddr.port = sACNPacket.port;
+      ProcessRecvPacket(routesBysACNUniverse, routingDestinationList, udpOutThreads, tcpClientThreads, sACNAddr, Protocol::ksACN, sACNPacket.p);
+    }
+
     // UDP input
     for (UDP_IN_THREADS::iterator i = udpInThreads.begin(); i != udpInThreads.end();)
     {
@@ -2041,8 +2076,6 @@ void RouterThread::run()
       else
         i++;
     }
-
-    RecvsACN(sacn);
 
     // TCP servers
     for (TCP_SERVER_THREADS::iterator i = tcpServerThreads.begin(); i != tcpServerThreads.end();)
@@ -2178,8 +2211,10 @@ void RouterThread::run()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void RouterThread::RecvsACN(sACN &sacn)
+void RouterThread::RecvsACN(sACN &sacn, EosUdpInThread::RECV_PORT_Q &recvQ)
 {
+  recvQ.clear();
+
   if (sacn.client)
   {
     if (sacn.timer.isValid())
@@ -2221,9 +2256,15 @@ void RouterThread::RecvsACN(sACN &sacn)
         merged.dmx = universe.dmx;
         merged.hasPerChannelPriority = universe.hasPerChannelPriority;
         if (merged.hasPerChannelPriority)
+        {
           merged.channelPriority = universe.channelPriority;
+          merged.channelIp = universe.channelIp;
+        }
         else
+        {
           merged.priority = universe.priority;
+          merged.ip = universe.ip;
+        }
       }
       else if (universe.hasPerChannelPriority)
       {
@@ -2236,6 +2277,7 @@ void RouterThread::RecvsACN(sACN &sacn)
             {
               merged.dmx[channel] = universe.dmx[channel];
               merged.channelPriority[channel] = universe.channelPriority[channel];
+              merged.channelIp[channel] = universe.channelIp[channel];
             }
           }
         }
@@ -2248,9 +2290,13 @@ void RouterThread::RecvsACN(sACN &sacn)
             {
               merged.dmx[channel] = universe.dmx[channel];
               merged.channelPriority[channel] = universe.channelPriority[channel];
+              merged.channelIp[channel] = universe.channelIp[channel];
             }
             else
+            {
               merged.channelPriority[channel] = merged.priority;
+              merged.channelIp[channel] = merged.ip;
+            }
           }
         }
       }
@@ -2265,6 +2311,7 @@ void RouterThread::RecvsACN(sACN &sacn)
             {
               merged.dmx[channel] = universe.dmx[channel];
               merged.channelPriority[channel] = universe.priority;
+              merged.channelIp[channel] = universe.ip;
             }
           }
         }
@@ -2272,6 +2319,7 @@ void RouterThread::RecvsACN(sACN &sacn)
         {
           merged.dmx = universe.dmx;
           merged.priority = universe.priority;
+          merged.ip = universe.ip;
         }
       }
     }
@@ -2288,7 +2336,17 @@ void RouterThread::RecvsACN(sACN &sacn)
     }
   }
 
-  // TODO: send output
+  // queue OSC style packets
+  for (UNIVERSE_NUMBER_SET::const_iterator activeIter = activeUniverses.begin(); activeIter != activeUniverses.end(); ++activeIter)
+  {
+    uint16_t universeNumber = *activeIter;
+    UNIVERSE_LIST::const_iterator universeIter = m_sACNRecv.merged.find(universeNumber);
+    if (universeIter == m_sACNRecv.merged.end())
+      continue;
+
+    const Universe &universe = universeIter->second;
+    recvQ.push_back(EosUdpInThread::sRecvPortPacket(universeNumber, nullptr, 0, universe.ip));
+  }
 
   m_sACNRecv.dirtyUniverses.clear();
 }
@@ -2363,6 +2421,7 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
   if (start_code == STARTCODE_DMX)
   {
     recvUniverse.priority = priority;
+    recvUniverse.ip = recvSource.ip;
     m_sACNRecv.dirtyUniverses.insert(universe);
 
     if (slot_count != 0 && pdata)
@@ -2371,6 +2430,7 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
   else if (start_code == STARTCODE_PRIORITY)
   {
     recvUniverse.hasPerChannelPriority = true;
+    recvUniverse.ip = recvSource.ip;
     m_sACNRecv.dirtyUniverses.insert(universe);
 
     if (slot_count != 0 && pdata)
