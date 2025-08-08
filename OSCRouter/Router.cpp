@@ -22,6 +22,7 @@
 #include "EosTimer.h"
 #include "EosUdp.h"
 #include "EosTcp.h"
+#include "streamcommon.h"
 #include <psn_lib.hpp>
 
 #ifndef WIN32
@@ -1155,6 +1156,9 @@ void RouterThread::BuildRoutes(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &rou
       if (route.src.protocol == Protocol::ksACN)
       {
         routes = &routesBysACNUniverse;
+
+        if (route.dst.addr.port == 0)
+          route.dst.addr.port = STREAM_IP_PORT;  // no destination port specified, so assume same port as source
       }
       else
       {
@@ -1171,10 +1175,10 @@ void RouterThread::BuildRoutes(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &rou
             }
           }
         }
-      }
 
-      if (route.dst.addr.port == 0)
-        route.dst.addr.port = route.src.addr.port;  // no destination port specified, so assume same port as source
+        if (route.dst.addr.port == 0)
+          route.dst.addr.port = route.src.addr.port;  // no destination port specified, so assume same port as source
+      }
 
       // create udp output thread if known dst, and not an explicit tcp client
       if (route.dst.protocol != Protocol::ksACN && tcpClientThreads.find(route.dst.addr) == tcpClientThreads.end())
@@ -1224,23 +1228,14 @@ void RouterThread::BuildRoutes(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &rou
 
 bool RouterThread::HasProtocolOutput(const ROUTES_BY_PORT &routesByPort, Protocol protocol)
 {
-  for (ROUTES_BY_PORT::const_iterator i = routesByPort.begin(); i != routesByPort.end(); ++i)
+  for (ROUTES_BY_PORT::const_iterator portIter = routesByPort.begin(); portIter != routesByPort.end(); ++portIter)
   {
-    if (HasProtocolOutput(i->second, protocol))
-      return true;
-  }
-
-  return false;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-bool RouterThread::HasProtocolOutput(const ROUTES_BY_IP &routesByIp, Protocol protocol)
-{
-  for (ROUTES_BY_IP::const_iterator ipIter = routesByIp.begin(); ipIter != routesByIp.end(); ++ipIter)
-  {
-    if (HasProtocolOutput(ipIter->second.routesByPath, protocol) || HasProtocolOutput(ipIter->second.routesByWildcardPath, protocol))
-      return true;
+    const ROUTES_BY_IP &routesByIp = portIter->second;
+    for (ROUTES_BY_IP::const_iterator ipIter = routesByIp.begin(); ipIter != routesByIp.end(); ++ipIter)
+    {
+      if (HasProtocolOutput(ipIter->second.routesByPath, protocol) || HasProtocolOutput(ipIter->second.routesByWildcardPath, protocol))
+        return true;
+    }
   }
 
   return false;
@@ -1312,8 +1307,16 @@ void RouterThread::BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &route
     {
       if (sacn.client->Startup(sacn.net, this))
       {
-        for (ROUTES_BY_PORT::const_iterator i = routesBysACNUniverse.begin(); i != routesBysACNUniverse.end(); ++i)
-          sacn.client->ListenUniverse(i->first, nullptr, 0);
+        for (ROUTES_BY_PORT::const_iterator universeIter = routesBysACNUniverse.begin(); universeIter != routesBysACNUniverse.end(); ++universeIter)
+        {
+          uint16_t universeNumber = universeIter->first;
+          const ROUTES_BY_IP &routesByIp = universeIter->second;
+
+          if (sacn.client->ListenUniverse(universeNumber, nullptr, 0))
+            SetItemState(routesByIp, ItemState::STATE_CONNECTED);
+          else
+            SetItemState(routesByIp, ItemState::STATE_NOT_CONNECTED);
+        }
       }
       else
       {
@@ -1947,6 +1950,29 @@ void RouterThread::SetItemState(ItemStateTable::ID id, ItemState::EnumState stat
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void RouterThread::SetItemState(const ROUTES_BY_IP &routesByIp, ItemState::EnumState state)
+{
+  for (ROUTES_BY_IP::const_iterator ipIter = routesByIp.begin(); ipIter != routesByIp.end(); ++ipIter)
+  {
+    SetItemState(ipIter->second.routesByPath, state);
+    SetItemState(ipIter->second.routesByWildcardPath, state);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void RouterThread::SetItemState(const ROUTES_BY_PATH &routesByPath, ItemState::EnumState state)
+{
+  for (ROUTES_BY_PATH::const_iterator pathIter = routesByPath.begin(); pathIter != routesByPath.end(); ++pathIter)
+  {
+    const ROUTE_DESTINATIONS &destinations = pathIter->second;
+    for (ROUTE_DESTINATIONS::const_iterator dstIter = destinations.begin(); dstIter != destinations.end(); ++dstIter)
+      SetItemState(dstIter->srcItemStateTableId, state);
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 void RouterThread::SetItemActivity(ItemStateTable::ID id)
 {
   m_Mutex.lock();
@@ -2015,6 +2041,8 @@ void RouterThread::run()
       else
         i++;
     }
+
+    RecvsACN(sacn);
 
     // TCP servers
     for (TCP_SERVER_THREADS::iterator i = tcpServerThreads.begin(); i != tcpServerThreads.end();)
@@ -2150,6 +2178,123 @@ void RouterThread::run()
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void RouterThread::RecvsACN(sACN &sacn)
+{
+  if (sacn.client)
+  {
+    if (sacn.timer.isValid())
+    {
+      if (sacn.timer.elapsed() >= 200)
+      {
+        sacn.client->FindExpiredSources();
+        sacn.timer.start();
+      }
+    }
+    else
+      sacn.timer.start();
+  }
+
+  QMutexLocker locker(&m_sACNRecv.mutex);
+
+  if (m_sACNRecv.dirtyUniverses.empty())
+    return;
+
+  UNIVERSE_NUMBER_SET activeUniverses;
+
+  for (SACN_SOURCE_LIST::const_iterator sourceIter = m_sACNRecv.sources.begin(); sourceIter != m_sACNRecv.sources.end(); ++sourceIter)
+  {
+    const sACNSource &source = sourceIter->second;
+
+    for (UNIVERSE_NUMBER_SET::const_iterator dirtyIter = m_sACNRecv.dirtyUniverses.begin(); dirtyIter != m_sACNRecv.dirtyUniverses.end(); ++dirtyIter)
+    {
+      uint16_t universeNumber = *dirtyIter;
+      UNIVERSE_LIST::const_iterator universeIter = source.universes.find(universeNumber);
+      if (universeIter == source.universes.end())
+        continue;
+
+      const Universe &universe = universeIter->second;
+      Universe &merged = m_sACNRecv.merged[universeNumber];
+
+      if (activeUniverses.insert(universeNumber).second)
+      {
+        // fist instance of this universe
+        merged.dmx = universe.dmx;
+        merged.hasPerChannelPriority = universe.hasPerChannelPriority;
+        if (merged.hasPerChannelPriority)
+          merged.channelPriority = universe.channelPriority;
+        else
+          merged.priority = universe.priority;
+      }
+      else if (universe.hasPerChannelPriority)
+      {
+        // merge with existing universe (per channel priority)
+        if (merged.hasPerChannelPriority)
+        {
+          for (int channel = 0; channel < UNIVERSE_SIZE; ++channel)
+          {
+            if (universe.channelPriority[channel] > merged.channelPriority[channel])
+            {
+              merged.dmx[channel] = universe.dmx[channel];
+              merged.channelPriority[channel] = universe.channelPriority[channel];
+            }
+          }
+        }
+        else
+        {
+          merged.hasPerChannelPriority = true;
+          for (int channel = 0; channel < UNIVERSE_SIZE; ++channel)
+          {
+            if (universe.channelPriority[channel] > merged.priority)
+            {
+              merged.dmx[channel] = universe.dmx[channel];
+              merged.channelPriority[channel] = universe.channelPriority[channel];
+            }
+            else
+              merged.channelPriority[channel] = merged.priority;
+          }
+        }
+      }
+      else
+      {
+        // merge with existing universe (per universe priority)
+        if (merged.hasPerChannelPriority)
+        {
+          for (int channel = 0; channel < UNIVERSE_SIZE; ++channel)
+          {
+            if (universe.priority > merged.channelPriority[channel])
+            {
+              merged.dmx[channel] = universe.dmx[channel];
+              merged.channelPriority[channel] = universe.priority;
+            }
+          }
+        }
+        else if (universe.priority > merged.priority)
+        {
+          merged.dmx = universe.dmx;
+          merged.priority = universe.priority;
+        }
+      }
+    }
+  }
+
+  // remove inactive universes
+  if (activeUniverses.size() < m_sACNRecv.dirtyUniverses.size())
+  {
+    for (UNIVERSE_NUMBER_SET::const_iterator dirtyIter = m_sACNRecv.dirtyUniverses.begin(); dirtyIter != m_sACNRecv.dirtyUniverses.end(); ++dirtyIter)
+    {
+      uint16_t universeNumber = *dirtyIter;
+      if (activeUniverses.find(universeNumber) == activeUniverses.end())
+        m_sACNRecv.merged.erase(universeNumber);
+    }
+  }
+
+  // TODO: send output
+
+  m_sACNRecv.dirtyUniverses.clear();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 void RouterThread::OSCParserClient_Log(const std::string &message)
 {
   m_PrivateLog.AddWarning(message);
@@ -2159,15 +2304,79 @@ void RouterThread::OSCParserClient_Log(const std::string &message)
 
 void RouterThread::OSCParserClient_Send(const char * /*buf*/, size_t /*size*/) {}
 
-void RouterThread::SourceDisappeared(const CID & /*source*/, uint2 /*universe*/) {}
-void RouterThread::SourcePCPExpired(const CID & /*source*/, uint2 /*universe*/) {}
-void RouterThread::SamplingStarted(uint2 /*universe*/) {}
-void RouterThread::SamplingEnded(uint2 /*universe*/) {}
-void RouterThread::UniverseData(const CID & /*source*/, const char * /*source_name*/, const CIPAddr & /*source_ip*/, uint2 /*universe*/, uint2 /*reserved*/, uint1 /*sequence*/, uint1 /*options*/,
-                                uint1 /*priority*/, uint1 /*start_code*/, uint2 /*slot_count*/, uint1 * /*pdata*/)
+////////////////////////////////////////////////////////////////////////////////
+
+void RouterThread::SourceDisappeared(const CID &source, uint2 universe)
 {
+  QMutexLocker locker(&m_sACNRecv.mutex);
+
+  SACN_SOURCE_LIST::iterator sourceIter = m_sACNRecv.sources.find(source);
+  if (sourceIter == m_sACNRecv.sources.end())
+    return;
+
+  sACNSource &recvSource = sourceIter->second;
+  UNIVERSE_LIST::iterator universeIter = recvSource.universes.find(universe);
+  if (universeIter == recvSource.universes.end())
+    return;
+
+  recvSource.universes.erase(universeIter);
+  m_sACNRecv.dirtyUniverses.insert(universe);
+
+  if (recvSource.universes.empty())
+    m_sACNRecv.sources.erase(sourceIter);
 }
-void RouterThread::UniverseBad(uint2 /*universe*/, netintid /*iface*/) {}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void RouterThread::SourcePCPExpired(const CID &source, uint2 universe)
+{
+  QMutexLocker locker(&m_sACNRecv.mutex);
+
+  SACN_SOURCE_LIST::iterator sourceIter = m_sACNRecv.sources.find(source);
+  if (sourceIter == m_sACNRecv.sources.end())
+    return;
+
+  sACNSource &recvSource = sourceIter->second;
+  UNIVERSE_LIST::iterator universeIter = recvSource.universes.find(universe);
+  if (universeIter == recvSource.universes.end())
+    return;
+
+  Universe &recvUniverse = universeIter->second;
+  if (!recvUniverse.hasPerChannelPriority)
+    return;
+
+  recvUniverse.hasPerChannelPriority = false;
+  m_sACNRecv.dirtyUniverses.insert(universe);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void RouterThread::UniverseData(const CID &source, const char * /*source_name*/, const CIPAddr &source_ip, uint2 universe, uint2 /*reserved*/, uint1 /*sequence*/, uint1 /*options*/, uint1 priority,
+                                uint1 start_code, uint2 slot_count, uint1 *pdata)
+{
+  QMutexLocker locker(&m_sACNRecv.mutex);
+
+  sACNSource &recvSource = m_sACNRecv.sources[source];
+  recvSource.ip = source_ip.GetV4Address();
+
+  Universe &recvUniverse = recvSource.universes[universe];
+  if (start_code == STARTCODE_DMX)
+  {
+    recvUniverse.priority = priority;
+    m_sACNRecv.dirtyUniverses.insert(universe);
+
+    if (slot_count != 0 && pdata)
+      memcpy(recvUniverse.dmx.data(), pdata, std::min(recvUniverse.dmx.size(), static_cast<size_t>(slot_count)));
+  }
+  else if (start_code == STARTCODE_PRIORITY)
+  {
+    recvUniverse.hasPerChannelPriority = true;
+    m_sACNRecv.dirtyUniverses.insert(universe);
+
+    if (slot_count != 0 && pdata)
+      memcpy(recvUniverse.channelPriority.data(), pdata, std::min(recvUniverse.channelPriority.size(), static_cast<size_t>(slot_count)));
+  }
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 

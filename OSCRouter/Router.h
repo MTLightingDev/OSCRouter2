@@ -86,6 +86,8 @@
 #define IPlatformStreamACNSrv IWinStreamACNSrv
 #endif
 
+#include <unordered_set>
+
 class EosTcp;
 
 namespace psn
@@ -385,11 +387,50 @@ protected:
 
   typedef std::vector<const ROUTE_DESTINATIONS *> DESTINATIONS_LIST;
 
+  enum EnumConstants
+  {
+    UNIVERSE_SIZE = 512
+  };
+
+  struct Universe
+  {
+    uint8_t priority = 0;
+    bool hasPerChannelPriority = false;
+    std::array<uint8_t, UNIVERSE_SIZE> dmx;
+    std::array<uint8_t, UNIVERSE_SIZE> channelPriority;
+
+    Universe()
+    {
+      dmx.fill(0);
+      channelPriority.fill(0);
+    }
+  };
+
+  typedef std::map<uint16_t, Universe> UNIVERSE_LIST;
+
+  struct sACNSource
+  {
+    unsigned int ip = 0;
+    UNIVERSE_LIST universes;
+  };
+
+  typedef std::map<CID, sACNSource> SACN_SOURCE_LIST;
+  typedef std::unordered_set<uint16_t> UNIVERSE_NUMBER_SET;
+
+  struct sACNRecv
+  {
+    QRecursiveMutex mutex;
+    UNIVERSE_NUMBER_SET dirtyUniverses;
+    SACN_SOURCE_LIST sources;
+    UNIVERSE_LIST merged;
+  };
+
   struct sACN
   {
     IPlatformAsyncSocketServ *net = nullptr;
     IPlatformStreamACNCli *client = nullptr;
     IPlatformStreamACNSrv *server = nullptr;
+    QElapsedTimer timer;
   };
 
   bool m_Run;
@@ -403,8 +444,10 @@ protected:
   ScriptEngine *m_ScriptEngine = nullptr;
   psn::psn_encoder *m_PSNEncoder = nullptr;
   QElapsedTimer m_PSNEncoderTimer;
+  sACNRecv m_sACNRecv;
 
   virtual void run();
+  virtual void RecvsACN(sACN &sacn);
   virtual void BuildRoutes(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &routesBysACNUniverse, UDP_IN_THREADS &udpInThreads, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads,
                            TCP_SERVER_THREADS &tcpServerThreads);
   virtual void BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &routesBysACNUniverse, sACN &sacn);
@@ -421,21 +464,24 @@ protected:
   virtual void MakeSendPath(const QString &srcPath, const QString &dstPath, const OSCArgument *args, size_t argsCount, QString &sendPath);
   virtual void UpdateLog();
   virtual void SetItemState(ItemStateTable::ID id, ItemState::EnumState state);
+  virtual void SetItemState(const ROUTES_BY_IP &routesByIp, ItemState::EnumState state);
+  virtual void SetItemState(const ROUTES_BY_PATH &routesByPath, ItemState::EnumState state);
   virtual void SetItemActivity(ItemStateTable::ID id);
+
+  // OSCParserClient
   virtual void OSCParserClient_Log(const std::string &message);
   virtual void OSCParserClient_Send(const char *buf, size_t size);
 
   // IStreamACNCliNotify
   void SourceDisappeared(const CID &source, uint2 universe) override;
   void SourcePCPExpired(const CID &source, uint2 universe) override;
-  void SamplingStarted(uint2 universe) override;
-  void SamplingEnded(uint2 universe) override;
+  void SamplingStarted(uint2 /*universe*/) override {}
+  void SamplingEnded(uint2 /*universe*/) override {}
   void UniverseData(const CID &source, const char *source_name, const CIPAddr &source_ip, uint2 universe, uint2 reserved, uint1 sequence, uint1 options, uint1 priority, uint1 start_code,
                     uint2 slot_count, uint1 *pdata) override;
-  void UniverseBad(uint2 universe, netintid iface) override;
+  void UniverseBad(uint2 /*universe*/, netintid /*iface*/) override {}
 
   static bool HasProtocolOutput(const ROUTES_BY_PORT &routesByPort, Protocol protocol);
-  static bool HasProtocolOutput(const ROUTES_BY_IP &routesByIp, Protocol protocol);
   static bool HasProtocolOutput(const ROUTES_BY_PATH &routesByPath, Protocol protocol);
   static void DestroysACN(sACN &sacn);
 };
