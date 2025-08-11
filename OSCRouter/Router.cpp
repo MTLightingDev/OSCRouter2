@@ -1560,8 +1560,26 @@ bool RouterThread::MakeOSCPacket(const EosAddr &addr, Protocol protocol, const Q
   QString sendPath;
   if (dst.script)
   {
-    // TODO: handle Protocol::ksACN
-    QString error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, args, argsCount, &packet);
+    QString error;
+
+    if (protocol == Protocol::ksACN)
+    {
+      std::array<uint8_t, UNIVERSE_SIZE> dmx;
+      {
+        QMutexLocker locker(&m_sACNRecv.mutex);
+        UNIVERSE_LIST::const_iterator universeIter = m_sACNRecv.merged.find(addr.port);
+        if (universeIter != m_sACNRecv.merged.end())
+        {
+          const Universe &universe = universeIter->second;
+          dmx = universe.dmx;
+        }
+      }
+
+      error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, /*args*/ nullptr, /*argsCount*/ 0, dmx.data(), dmx.size(), &packet);
+    }
+    else
+      error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, args, argsCount, /*universe*/ nullptr, /*unvierseCount*/ 0, &packet);
+
     if (error.isEmpty())
       return true;
 
@@ -2440,61 +2458,71 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-QString ScriptEngine::evaluate(const QString &script, const QString &path /*= QString()*/, const OSCArgument *args /*= nullptr*/, size_t argsCount /*= 0*/, EosPacket *packet /*= nullptr*/)
+QString ScriptEngine::evaluate(const QString &script, const QString &path /*= QString()*/, const OSCArgument *args /*= nullptr*/, size_t argsCount /*= 0*/, const uint8_t *universe /*= nullptr*/,
+                               size_t universeCount /*= 0*/, EosPacket *packet /*= nullptr*/)
 {
   // set globals
   m_JS.globalObject().setProperty(QLatin1String("OSC"), path);
 
-  quint32 count = static_cast<quint32>(argsCount);
-  if (!args)
-    count = 0;
+  QJSValue jsarray;
 
-  QJSValue jsarray = m_JS.newArray(count);
-  for (quint32 i = 0; i < count; ++i)
+  if (args && argsCount != 0)
   {
-    switch (args[i].GetType())
+    jsarray = m_JS.newArray(static_cast<quint32>(argsCount));
+    for (quint32 i = 0; i < static_cast<quint32>(argsCount); ++i)
     {
-      case OSCArgument::OSC_TYPE_INT32:
-      case OSCArgument::OSC_TYPE_INT64:
-      case OSCArgument::OSC_TYPE_TIME:
-      case OSCArgument::OSC_TYPE_RGBA32:
-      case OSCArgument::OSC_TYPE_MIDI:
+      switch (args[i].GetType())
       {
-        int n = 0;
-        if (args[i].GetInt(n))
-          jsarray.setProperty(i, n);
-      }
-      break;
+        case OSCArgument::OSC_TYPE_INT32:
+        case OSCArgument::OSC_TYPE_INT64:
+        case OSCArgument::OSC_TYPE_TIME:
+        case OSCArgument::OSC_TYPE_RGBA32:
+        case OSCArgument::OSC_TYPE_MIDI:
+        {
+          int n = 0;
+          if (args[i].GetInt(n))
+            jsarray.setProperty(i, n);
+        }
+        break;
 
-      case OSCArgument::OSC_TYPE_FLOAT32:
-      {
-        float n = 0;
-        if (args[i].GetFloat(n))
-          jsarray.setProperty(i, n);
-      }
-      break;
+        case OSCArgument::OSC_TYPE_FLOAT32:
+        {
+          float n = 0;
+          if (args[i].GetFloat(n))
+            jsarray.setProperty(i, n);
+        }
+        break;
 
-      case OSCArgument::OSC_TYPE_FLOAT64:
-      {
-        double n = 0;
-        if (args[i].GetDouble(n))
-          jsarray.setProperty(i, n);
-      }
-      break;
+        case OSCArgument::OSC_TYPE_FLOAT64:
+        {
+          double n = 0;
+          if (args[i].GetDouble(n))
+            jsarray.setProperty(i, n);
+        }
+        break;
 
-      case OSCArgument::OSC_TYPE_TRUE: jsarray.setProperty(i, true); break;
-      case OSCArgument::OSC_TYPE_FALSE: jsarray.setProperty(i, false); break;
-      case OSCArgument::OSC_TYPE_INFINITY: jsarray.setProperty(i, std::numeric_limits<int>::infinity()); break;
+        case OSCArgument::OSC_TYPE_TRUE: jsarray.setProperty(i, true); break;
+        case OSCArgument::OSC_TYPE_FALSE: jsarray.setProperty(i, false); break;
+        case OSCArgument::OSC_TYPE_INFINITY: jsarray.setProperty(i, std::numeric_limits<int>::infinity()); break;
 
-      default:
-      {
-        std::string str;
-        if (args[i].GetString(str))
-          jsarray.setProperty(i, QString::fromStdString(str));
+        default:
+        {
+          std::string str;
+          if (args[i].GetString(str))
+            jsarray.setProperty(i, QString::fromStdString(str));
+        }
+        break;
       }
-      break;
     }
   }
+  else if (universe && universeCount != 0)
+  {
+    jsarray = m_JS.newArray(static_cast<quint32>(universeCount));
+    for (quint32 i = 0; i < static_cast<quint32>(universeCount); ++i)
+      jsarray.setProperty(i, universe[i]);
+  }
+  else
+    jsarray = m_JS.newArray(0);
 
   m_JS.globalObject().setProperty(QLatin1String("ARGS"), jsarray);
 
@@ -2526,7 +2554,7 @@ QString ScriptEngine::evaluate(const QString &script, const QString &path /*= QS
   OSCPacketWriter osc(sendPath.toUtf8().constData());
 
   jsarray = m_JS.globalObject().property(QLatin1String("ARGS"));
-  count = static_cast<quint32>(qMax(0, jsarray.property(QLatin1String("length")).toInt()));
+  quint32 count = static_cast<quint32>(qMax(quint32(0), jsarray.property(QLatin1String("length")).toUInt()));
   for (quint32 i = 0; i < count; ++i)
   {
     QJSValue arg = jsarray.property(i);
