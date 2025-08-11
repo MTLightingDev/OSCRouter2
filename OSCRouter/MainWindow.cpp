@@ -448,10 +448,15 @@ int RoutingCol::UpdateLayout()
   for (size_t row = 0; row < m_Rows.size(); ++row)
   {
     Widgets& widgets = m_Rows[row].widgets;
-    for (size_t w = 0; w < widgets.size(); ++w)
-      widgets[w]->setGeometry(0, y, width(), widgets[w]->height());
 
-    y += m_Rows[row].height;
+    int rowHeight = m_Rows[row].height;
+    for (size_t w = 0; w < widgets.size(); ++w)
+    {
+      int h = widgets[w]->height();
+      widgets[w]->setGeometry(0, y + qRound((rowHeight - h) / 2.0), width(), h);
+    }
+
+    y += rowHeight;
   }
 
   return y;
