@@ -402,7 +402,8 @@ protected:
 
   enum EnumConstants
   {
-    UNIVERSE_SIZE = 512
+    UNIVERSE_SIZE = 512,
+    DEFAULT_PRIORITY = 100
   };
 
   struct Universe
@@ -436,12 +437,30 @@ protected:
     UNIVERSE_LIST merged;
   };
 
+  struct SendUniverseData
+  {
+    uint handle = 0;
+    uint1 *channels = nullptr;
+  };
+
+  struct SendUniverse
+  {
+    uint1 priority = static_cast<uint1>(DEFAULT_PRIORITY);
+    uint1 perChannelPriority = static_cast<uint1>(DEFAULT_PRIORITY);
+    SendUniverseData dmx;
+    SendUniverseData channelPriority;
+  };
+
+  typedef std::unordered_map<uint16_t, SendUniverse> SEND_UNIVERSE_LIST;
+
   struct sACN
   {
     IPlatformAsyncSocketServ *net = nullptr;
     IPlatformStreamACNCli *client = nullptr;
     IPlatformStreamACNSrv *server = nullptr;
-    QElapsedTimer timer;
+    SEND_UNIVERSE_LIST output;
+    QElapsedTimer recvTimer;
+    QElapsedTimer sendTimer;
   };
 
   bool m_Run;
@@ -464,12 +483,13 @@ protected:
   virtual void BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &routesBysACNUniverse, sACN &sacn);
   virtual EosUdpOutThread *CreateUdpOutThread(const EosAddr &addr, ItemStateTable::ID itemStateTableId, UDP_OUT_THREADS &udpOutThreads);
   virtual void AddRoutingDestinations(bool isOSC, const QString &path, const sRoutesByIp &routesByIp, DESTINATIONS_LIST &destinations);
-  virtual void ProcessRecvQ(OSCParser &oscBundleParser, ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads,
-                            const EosAddr &addr, EosUdpInThread::RECV_Q &recvQ);
-  virtual void ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads, const EosAddr &addr,
-                                 Protocol protocol, EosUdpInThread::sRecvPacket &recvPacket);
+  virtual void ProcessRecvQ(sACN &sacn, OSCParser &oscBundleParser, ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads,
+                            TCP_CLIENT_THREADS &tcpClientThreads, const EosAddr &addr, EosUdpInThread::RECV_Q &recvQ);
+  virtual void ProcessRecvPacket(sACN &sacn, ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads,
+                                 const EosAddr &addr, Protocol protocol, EosUdpInThread::sRecvPacket &recvPacket);
   virtual bool MakeOSCPacket(const EosAddr &addr, Protocol protocol, const QString &srcPath, const EosRouteDst &dst, OSCArgument *args, size_t argsCount, EosPacket &packet);
   virtual bool MakePSNPacket(EosPacket &osc, EosPacket &psn);
+  virtual bool SendsACN(sACN &sacn, const EosRouteDst &dst, EosPacket &osc);
   virtual void ProcessTcpConnectionQ(TCP_CLIENT_THREADS &tcpClientThreads, OSCStream::EnumFrameMode frameMode, EosTcpServerThread::CONNECTION_Q &tcpConnectionQ);
   virtual bool ApplyTransform(OSCArgument &arg, const EosRouteDst &dst, OSCPacketWriter &packet);
   virtual void MakeSendPath(const EosAddr &addr, Protocol protocol, const QString &srcPath, const QString &dstPath, const OSCArgument *args, size_t argsCount, QString &sendPath);

@@ -1250,7 +1250,7 @@ bool RouterThread::HasProtocolOutput(const ROUTES_BY_PATH &routesByPath, Protoco
     const ROUTE_DESTINATIONS &destinations = pathIter->second;
     for (ROUTE_DESTINATIONS::const_iterator dstIter = destinations.begin(); dstIter != destinations.end(); ++dstIter)
     {
-      if (dstIter->dst.protocol == protocol)
+      if (dstIter->dst.protocol == protocol && dstIter->dst.addr.port != 0)
         return true;
     }
   }
@@ -1279,6 +1279,8 @@ void RouterThread::DestroysACN(sACN &sacn)
     IPlatformAsyncSocketServ::DestroyInstance(sacn.net);
     sacn.net = nullptr;
   }
+
+  sacn.output.clear();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1327,13 +1329,7 @@ void RouterThread::BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &route
   }
 
   if (hasOutput)
-  {
     sacn.server = IPlatformStreamACNSrv::CreateInstance();
-    if (sacn.server)
-    {
-      // TODO
-    }
-  }
 
   if (!sacn.client && !sacn.server)
     DestroysACN(sacn);
@@ -1392,7 +1388,7 @@ void RouterThread::AddRoutingDestinations(bool isOSC, const QString &path, const
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void RouterThread::ProcessRecvQ(OSCParser &oscBundleParser, ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads,
+void RouterThread::ProcessRecvQ(sACN &sacn, OSCParser &oscBundleParser, ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads,
                                 TCP_CLIENT_THREADS &tcpClientThreads, const EosAddr &addr, EosUdpInThread::RECV_Q &recvQ)
 {
   for (EosUdpInThread::RECV_Q::iterator i = recvQ.begin(); i != recvQ.end(); i++)
@@ -1411,21 +1407,21 @@ void RouterThread::ProcessRecvQ(OSCParser &oscBundleParser, ROUTES_BY_PORT &rout
       if (!bundleQ.empty())
       {
         for (EosUdpInThread::RECV_Q::iterator j = bundleQ.begin(); j != bundleQ.end(); j++)
-          ProcessRecvPacket(routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, addr, Protocol::kOSC, *j);
+          ProcessRecvPacket(sacn, routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, addr, Protocol::kOSC, *j);
 
         continue;
       }
     }
 
-    ProcessRecvPacket(routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, addr, Protocol::kInvalid, recvPacket);
+    ProcessRecvPacket(sacn, routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, addr, Protocol::kInvalid, recvPacket);
   }
   recvQ.clear();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads, const EosAddr &addr,
-                                     Protocol protocol, EosUdpInThread::sRecvPacket &recvPacket)
+void RouterThread::ProcessRecvPacket(sACN &sacn, ROUTES_BY_PORT &routesByPort, DESTINATIONS_LIST &routingDestinationList, UDP_OUT_THREADS &udpOutThreads, TCP_CLIENT_THREADS &tcpClientThreads,
+                                     const EosAddr &addr, Protocol protocol, EosUdpInThread::sRecvPacket &recvPacket)
 {
   routingDestinationList.clear();
 
@@ -1524,6 +1520,11 @@ void RouterThread::ProcessRecvPacket(ROUTES_BY_PORT &routesByPort, DESTINATIONS_
                 {
                   EosPacket psnPacket;
                   if (MakePSNPacket(oscPacket, psnPacket) && thread->Send(psnPacket))
+                    sent = true;
+                }
+                else if (routeDst.dst.protocol == Protocol::ksACN)
+                {
+                  if (SendsACN(sacn, routeDst.dst, oscPacket))
                     sent = true;
                 }
                 else if (thread->Send(oscPacket))
@@ -1769,6 +1770,196 @@ bool RouterThread::MakePSNPacket(EosPacket &osc, EosPacket &psn)
   }
 
   return false;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+bool RouterThread::SendsACN(sACN &sacn, const EosRouteDst &dst, EosPacket &osc)
+{
+  if (!sacn.server)
+    return false;
+
+  uint16_t universeNumber = dst.addr.port;
+  if (universeNumber == 0)
+    return false;
+
+  char *data = osc.GetData();
+  if (!data || osc.GetSize() < 1)
+    return false;
+
+  // find osc path null terminator
+  bool sent = false;
+  for (int i = 0; i < osc.GetSize(); i++)
+  {
+    if (data[i] == 0)
+    {
+      size_t argCount = 0xffffffff;
+      OSCArgument *args = OSCArgument::GetArgs(&data[i], static_cast<size_t>(osc.GetSize()), argCount);
+      if (args)
+      {
+        if (argCount != 0)
+        {
+          int offset = 0;
+          uint1 priority = static_cast<uint1>(DEFAULT_PRIORITY);
+          bool hasPriority = false;
+          bool perChannelPriority = false;
+
+          QString path = QString::fromUtf8(data[0] == '/' ? &data[1] : &data[0]);
+          QStringList parts = path.split(QLatin1Char('/'));
+          for (int part = 0; part < parts.size(); ++part)
+          {
+            if (parts[part] == QLatin1String("sacn"))
+            {
+              int numberPart = part + 1;
+              if (numberPart < parts.size())
+              {
+                bool ok = false;
+                int n = parts[numberPart].toInt(&ok);
+                if (ok)
+                {
+                  offset = std::max(0, n - 1);
+                  ++part;
+                }
+              }
+            }
+            else if (parts[part] == QLatin1String("priority"))
+            {
+              int numberPart = part + 1;
+              if (numberPart < parts.size())
+              {
+                bool ok = false;
+                int n = parts[numberPart].toInt(&ok);
+                if (ok && n >= 0)
+                {
+                  priority = static_cast<uint1>(std::min(n, 255));
+                  hasPriority = true;
+                  ++part;
+                }
+              }
+            }
+            else if (parts[part] == QLatin1String("perChannelPriority"))
+            {
+              int numberPart = part + 1;
+              if (numberPart < parts.size())
+              {
+                bool ok = false;
+                int n = parts[numberPart].toInt(&ok);
+                if (ok && n >= 0)
+                {
+                  priority = static_cast<uint1>(std::min(n, 255));
+                  hasPriority = true;
+                  perChannelPriority = true;
+                  ++part;
+                }
+              }
+            }
+          }
+
+          if (offset < UNIVERSE_SIZE)
+          {
+            SendUniverse &universe = sacn.output[universeNumber];
+
+            static const uint1 kCIDBytes[] = {0x37, 0x6b, 0xa8, 0x33, 0x93, 0xf1, 0x4c, 0xcf, 0x91, 0xc0, 0xe1, 0x4c, 0xaf, 0x76, 0xe2, 0xd4};
+            static const CID kCID(kCIDBytes);
+            static const char *kName = "OSCRouter";
+
+            bool dirty = false;
+
+            // if priority changed, must re-create universe
+            if (universe.dmx.channels && !perChannelPriority && hasPriority && universe.priority != priority)
+              universe.dmx = SendUniverseData();
+
+            if (!universe.dmx.channels)
+            {
+              // create dmx
+              uint1 *pslots = nullptr;
+              uint handle = 0;
+              if (sacn.server->CreateUniverse(kCID, nullptr, 0, kName, static_cast<uint1>(priority), 0, 0, STARTCODE_DMX, universeNumber, static_cast<uint2>(UNIVERSE_SIZE), pslots, handle))
+              {
+                universe.priority = priority;
+                universe.dmx.handle = handle;
+                universe.dmx.channels = pslots;
+                dirty = true;
+              }
+            }
+
+            if (universe.dmx.channels)
+            {
+              if (perChannelPriority)
+              {
+                bool initialize = false;
+                if (!universe.channelPriority.channels)
+                {
+                  // create perChannelPriority
+                  uint1 *pslots = nullptr;
+                  uint handle = 0;
+                  if (sacn.server->CreateUniverse(kCID, nullptr, 0, kName, static_cast<uint1>(priority), 0, 0, STARTCODE_PRIORITY, universeNumber, static_cast<uint2>(UNIVERSE_SIZE), pslots, handle))
+                  {
+                    universe.channelPriority.handle = handle;
+                    universe.channelPriority.channels = pslots;
+                    initialize = true;
+                  }
+                }
+
+                if (universe.channelPriority.channels && (initialize || (hasPriority && universe.perChannelPriority != priority)))
+                {
+                  // update perChannelPriority
+                  universe.perChannelPriority = priority;
+
+                  for (size_t arg = 0; arg < argCount; ++arg)
+                  {
+                    int channel = offset + static_cast<int>(arg);
+                    if (channel >= UNIVERSE_SIZE)
+                      break;
+
+                    universe.channelPriority.channels[channel] = universe.perChannelPriority;
+                  }
+
+                  sacn.server->SetUniversesDirty(&universe.channelPriority.handle, 1);
+                }
+              }
+              else if (universe.channelPriority.channels)
+              {
+                sacn.server->DestroyUniverse(universe.channelPriority.handle);
+                universe.channelPriority = SendUniverseData();
+              }
+
+              // update dmx
+              for (size_t arg = 0; arg < argCount; ++arg)
+              {
+                int channel = offset + static_cast<int>(arg);
+                if (channel >= UNIVERSE_SIZE)
+                  break;
+
+                int n = 0;
+                if (!args[arg].GetInt(n))
+                  n = 0;
+
+                uint1 value = static_cast<uint1>(std::clamp(n, 0, 255));
+                if (universe.dmx.channels[channel] != value)
+                {
+                  universe.dmx.channels[channel] = value;
+                  dirty = true;
+                }
+              }
+
+              if (dirty)
+              {
+                sacn.server->SetUniversesDirty(&universe.dmx.handle, 1);
+                sent = true;
+              }
+            }
+          }
+        }
+
+        delete[] args;
+      }
+
+      break;
+    }
+  }
+
+  return sent;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2068,7 +2259,7 @@ void RouterThread::run()
       EosUdpInThread::sRecvPortPacket &sACNPacket = sACNRecvQ[i];
       sACNAddr.fromUInt(sACNPacket.p.ip);
       sACNAddr.port = sACNPacket.port;
-      ProcessRecvPacket(routesBysACNUniverse, routingDestinationList, udpOutThreads, tcpClientThreads, sACNAddr, Protocol::ksACN, sACNPacket.p);
+      ProcessRecvPacket(sacn, routesBysACNUniverse, routingDestinationList, udpOutThreads, tcpClientThreads, sACNAddr, Protocol::ksACN, sACNPacket.p);
     }
 
     // UDP input
@@ -2084,7 +2275,7 @@ void RouterThread::run()
       if (!recvQ.empty())
         SetItemActivity(thread->GetItemStateTableId());
 
-      ProcessRecvQ(oscBundleParser, routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, thread->GetAddr(), recvQ);
+      ProcessRecvQ(sacn, oscBundleParser, routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, thread->GetAddr(), recvQ);
 
       if (!running)
       {
@@ -2134,7 +2325,7 @@ void RouterThread::run()
       if (!recvQ.empty())
         SetItemActivity(thread->GetItemStateTableId());
 
-      ProcessRecvQ(oscBundleParser, routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, thread->GetAddr(), recvQ);
+      ProcessRecvQ(sacn, oscBundleParser, routesByPort, routingDestinationList, udpOutThreads, tcpClientThreads, thread->GetAddr(), recvQ);
 
       if (!running)
       {
@@ -2163,6 +2354,21 @@ void RouterThread::run()
       }
       else
         i++;
+    }
+
+    // sACN output
+    if (sacn.server)
+    {
+      if (sacn.sendTimer.isValid())
+      {
+        if (sacn.sendTimer.elapsed() >= 22)
+        {
+          sacn.server->Tick(nullptr, 0);
+          sacn.sendTimer.start();
+        }
+      }
+      else
+        sacn.sendTimer.start();
     }
 
     UpdateLog();
@@ -2235,16 +2441,16 @@ void RouterThread::RecvsACN(sACN &sacn, EosUdpInThread::RECV_PORT_Q &recvQ)
 
   if (sacn.client)
   {
-    if (sacn.timer.isValid())
+    if (sacn.recvTimer.isValid())
     {
-      if (sacn.timer.elapsed() >= 200)
+      if (sacn.recvTimer.elapsed() >= 200)
       {
         sacn.client->FindExpiredSources();
-        sacn.timer.start();
+        sacn.recvTimer.start();
       }
     }
     else
-      sacn.timer.start();
+      sacn.recvTimer.start();
   }
 
   QMutexLocker locker(&m_sACNRecv.mutex);
