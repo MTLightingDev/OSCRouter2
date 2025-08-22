@@ -1777,7 +1777,8 @@ QString RoutingWidget::GetHelpText(Col col, std::optional<Protocol> protocol, bo
       {
         text +=
             tr("\n\n"
-               "JavaScript Variables:\n--------------------\n"
+               "JavaScript Variables:\n"
+               "--------------------\n"
                "OSC = outgoing osc path (string)\n"
                "ARGS = array of osc arguments\n"
                "\n"
