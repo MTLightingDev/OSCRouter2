@@ -95,6 +95,19 @@ protected:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+class LineEdit : public QLineEdit
+{
+  Q_OBJECT
+
+public:
+  explicit LineEdit(QWidget* parent = nullptr);
+  explicit LineEdit(const QString& contents, QWidget* parent = nullptr);
+
+  QSize sizeHint() const override;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
 class ScriptEdit : public QTextEdit
 {
   Q_OBJECT
@@ -152,6 +165,39 @@ private slots:
 
 private:
   size_t m_Id = 0;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+class SplitterHandle : public QSplitterHandle
+{
+  Q_OBJECT
+
+public:
+  SplitterHandle(Qt::Orientation orientation, QSplitter* parent);
+
+signals:
+  void autoSize(SplitterHandle* splitterHandle);
+
+protected:
+  void mouseDoubleClickEvent(QMouseEvent* event) override;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+class Splitter : public QSplitter
+{
+  Q_OBJECT
+
+public:
+  explicit Splitter(QWidget* parent = nullptr);
+  explicit Splitter(Qt::Orientation orientation, QWidget* parent = nullptr);
+
+private slots:
+  void onAutoSize(SplitterHandle* splitterHandle);
+
+protected:
+  QSplitterHandle* createHandle() override;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -237,13 +283,13 @@ private:
   {
     size_t id = 0;
     ItemStateTable::ID itemStateTableId = ItemStateTable::sm_Invalid_Id;
-    QLineEdit* label = nullptr;
+    LineEdit* label = nullptr;
     Indicator* state = nullptr;
     Indicator* activity = nullptr;
     QComboBox* mode = nullptr;
     QComboBox* framing = nullptr;
-    QLineEdit* ip = nullptr;
-    QLineEdit* port = nullptr;
+    LineEdit* ip = nullptr;
+    LineEdit* port = nullptr;
     RoutingButton* addRemove = nullptr;
   };
 
@@ -252,7 +298,7 @@ private:
   Rows m_Rows;
   QLabel* m_Headers[static_cast<int>(Col::kCount)];
   QScrollArea* m_Scroll = nullptr;
-  QSplitter* m_Cols = nullptr;
+  Splitter* m_Cols = nullptr;
 
   void LoadLine(const QString& line, Router::CONNECTIONS& connections);
   void AddRow(size_t id, bool remove, const Router::sConnection& connection);
@@ -356,27 +402,27 @@ private:
   {
     size_t id = 0;
     ItemStateTable::ID inItemStateTableId = ItemStateTable::sm_Invalid_Id;
-    QLineEdit* label = nullptr;
+    LineEdit* label = nullptr;
     Indicator* inState = nullptr;
     Indicator* inActivity = nullptr;
-    QLineEdit* inIP = nullptr;
-    QLineEdit* inPort = nullptr;
+    LineEdit* inIP = nullptr;
+    LineEdit* inPort = nullptr;
     ProtocolComboBox* inProtocol = nullptr;
-    QLineEdit* inPath = nullptr;
-    QLineEdit* inMin = nullptr;
-    QLineEdit* inMax = nullptr;
+    LineEdit* inPath = nullptr;
+    LineEdit* inMin = nullptr;
+    LineEdit* inMax = nullptr;
     QLabel* divider = nullptr;
     ItemStateTable::ID outItemStateTableId = ItemStateTable::sm_Invalid_Id;
     Indicator* outState = nullptr;
     Indicator* outActivity = nullptr;
-    QLineEdit* outIP = nullptr;
-    QLineEdit* outPort = nullptr;
+    LineEdit* outIP = nullptr;
+    LineEdit* outPort = nullptr;
     ProtocolComboBox* outProtocol = nullptr;
-    QLineEdit* outPath = nullptr;
+    LineEdit* outPath = nullptr;
     ScriptEdit* outScriptText = nullptr;
     RoutingCheckBox* outScript = nullptr;
-    QLineEdit* outMin = nullptr;
-    QLineEdit* outMax = nullptr;
+    LineEdit* outMin = nullptr;
+    LineEdit* outMax = nullptr;
     RoutingButton* addRemove = nullptr;
   };
 
@@ -394,7 +440,7 @@ private:
   QLabel* m_Outgoing = nullptr;
   QWidget* m_Headers[static_cast<int>(Col::kCount)];
   QScrollArea* m_Scroll = nullptr;
-  QSplitter* m_Cols = nullptr;
+  Splitter* m_Cols = nullptr;
   HelpDialog m_Help;
 
   void LoadLine(const QString& line, Router::ROUTES& routes);

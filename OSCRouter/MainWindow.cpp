@@ -279,6 +279,32 @@ void Indicator::onUpdate()
 
 ////////////////////////////////////////////////////////////////////////////////
 
+LineEdit::LineEdit(QWidget* parent /*= nullptr*/)
+  : QLineEdit(parent)
+{
+}
+
+LineEdit::LineEdit(const QString& contents, QWidget* parent /*= nullptr*/)
+  : QLineEdit(contents, parent)
+{
+}
+
+QSize LineEdit::sizeHint() const
+{
+  ensurePolished();
+  QFontMetrics fm(font());
+  const int iconSize = style()->pixelMetric(QStyle::PM_SmallIconSize, nullptr, this);
+  const QMargins tm = textMargins();
+  const QMargins cm = contentsMargins();
+  int h = qMax(fm.height(), qMax(14, iconSize - 2)) + 2 + tm.top() + tm.bottom() + cm.top() + cm.bottom();
+  int w = fm.horizontalAdvance(text()) + 4 + tm.left() + tm.right() + cm.left() + cm.right();
+  QStyleOptionFrame opt;
+  initStyleOption(&opt);
+  return style()->sizeFromContents(QStyle::CT_LineEdit, &opt, QSize(w, h), this);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 ScriptEdit::ScriptEdit(QWidget* parent /*= nullptr*/)
   : QTextEdit(parent)
 {
@@ -301,7 +327,7 @@ QSize ScriptEdit::sizeHint() const
   static QSize kSizeHint;
   if (kSizeHint.isEmpty())
   {
-    QLineEdit* temp = new QLineEdit();
+    LineEdit* temp = new LineEdit();
     kSizeHint = temp->sizeHint();
     kSizeHint.setHeight(kSizeHint.height() * 3);
     temp->deleteLater();
@@ -358,6 +384,56 @@ RoutingCheckBox::RoutingCheckBox(size_t id, QWidget* parent /*= nullptr*/)
 void RoutingCheckBox::onToggled(bool checked)
 {
   emit toggledWithId(m_Id, checked);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+SplitterHandle::SplitterHandle(Qt::Orientation orientation, QSplitter* parent)
+  : QSplitterHandle(orientation, parent)
+{
+}
+
+void SplitterHandle::mouseDoubleClickEvent(QMouseEvent* event)
+{
+  QSplitterHandle::mouseDoubleClickEvent(event);
+  emit autoSize(this);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+Splitter::Splitter(QWidget* parent /*= nullptr*/)
+  : QSplitter(parent)
+{
+}
+
+Splitter::Splitter(Qt::Orientation orientation, QWidget* parent /*= nullptr*/)
+  : QSplitter(orientation, parent)
+{
+}
+
+void Splitter::onAutoSize(SplitterHandle* splitterHandle)
+{
+  if (!splitterHandle)
+    return;
+
+  for (int i = 1; i < count(); ++i)
+  {
+    if (handle(i) == splitterHandle)
+    {
+      QWidget* w = widget(i - 1);
+      if (w)
+        moveSplitter(w->x() + w->sizeHint().width() + 1, i);
+
+      return;
+    }
+  }
+}
+
+QSplitterHandle* Splitter::createHandle()
+{
+  SplitterHandle* splitterHandle = new SplitterHandle(orientation(), this);
+  connect(splitterHandle, &SplitterHandle::autoSize, this, &Splitter::onAutoSize);
+  return splitterHandle;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -476,7 +552,7 @@ TcpWidget::TcpWidget(QWidget* parent /*= nullptr*/)
   m_Scroll = new QScrollArea(this);
   m_Scroll->setWidgetResizable(true);
 
-  m_Cols = new QSplitter(m_Cols);
+  m_Cols = new Splitter(m_Scroll);
   m_Scroll->setWidget(m_Cols);
   m_Cols->show();
   for (int i = 0; i < static_cast<int>(Col::kCount); ++i)
@@ -547,7 +623,7 @@ void TcpWidget::AddRow(size_t id, bool remove, const Router::sConnection& connec
 
   Row row;
   row.id = id;
-  row.label = new QLineEdit(connection.label, m_Cols->widget(col));
+  row.label = new LineEdit(connection.label, m_Cols->widget(col));
   row.label->setToolTip(tr("Text label for this TCP connection"));
   AddCol(col++, row.label);
 
@@ -588,12 +664,12 @@ void TcpWidget::AddRow(size_t id, bool remove, const Router::sConnection& connec
   row.framing->setCurrentIndex(connection.frameMode);
   AddCol(col++, row.framing, row.framing->sizeHint().width());
 
-  row.ip = new QLineEdit(m_Cols->widget(col));
+  row.ip = new LineEdit(m_Cols->widget(col));
   row.ip->setToolTip(tr("Server: local network interface for TCP server to run on\n\nClient: IP address of TCP server to connect to"));
   row.ip->setText(connection.addr.ip);
   AddCol(col++, row.ip);
 
-  row.port = new QLineEdit(m_Cols->widget(col));
+  row.port = new LineEdit(m_Cols->widget(col));
   row.port->setToolTip(tr("Server: local network interface for TCP server to run on\n\nClient: IP address of TCP server to connect to"));
   row.port->setText((connection.addr.port == 0) ? QString() : QString::number(connection.addr.port));
   AddCol(col++, row.port);
@@ -947,7 +1023,7 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
   m_Scroll = new QScrollArea(this);
   m_Scroll->setWidgetResizable(true);
 
-  m_Cols = new QSplitter(m_Cols);
+  m_Cols = new Splitter(m_Scroll);
   m_Scroll->setWidget(m_Cols);
   m_Cols->show();
   for (int i = 0; i < static_cast<int>(Col::kCount); ++i)
@@ -1042,7 +1118,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const E
 
   Row row;
   row.id = id;
-  row.label = new QLineEdit(label, m_Cols->widget(col));
+  row.label = new LineEdit(label, m_Cols->widget(col));
   row.label->setToolTip(tr("Text label for this route"));
   AddCol(col++, row.label);
 
@@ -1060,7 +1136,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const E
   row.inActivity->Deactivate();
   AddCol(col++, row.inActivity, /*fixed*/ true);
 
-  row.inIP = new QLineEdit(m_Cols->widget(col));
+  row.inIP = new LineEdit(m_Cols->widget(col));
   row.inIP->setToolTip(
       tr("Only route packets received from this specific IP address\n"
          "\n"
@@ -1074,7 +1150,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const E
     row.inIP->setText(src.addr.ip + QLatin1Char(',') + src.multicastIP);
   AddCol(col++, row.inIP);
 
-  row.inPort = new QLineEdit(m_Cols->widget(col));
+  row.inPort = new LineEdit(m_Cols->widget(col));
   row.inPort->setText((src.addr.port == 0) ? QString() : QString::number(src.addr.port));
   AddCol(col++, row.inPort);
 
@@ -1082,18 +1158,18 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const E
   connect(row.inProtocol, &ProtocolComboBox::protocolChanged, this, &RoutingWidget::onInProtocolChanged);
   AddCol(col++, row.inProtocol);
 
-  row.inPath = new QLineEdit(m_Cols->widget(col));
+  row.inPath = new LineEdit(m_Cols->widget(col));
   row.inPath->setText(src.path);
   AddCol(col++, row.inPath);
 
-  row.inMin = new QLineEdit(m_Cols->widget(col));
+  row.inMin = new LineEdit(m_Cols->widget(col));
   row.inMin->setToolTip(tr("Clip first outgoing OSC argument\n\nScale first outgoing OSC argument when all min/max fields populated"));
   QString transformStr;
   TransformToString(dst.inMin, transformStr);
   row.inMin->setText(transformStr);
   AddCol(col++, row.inMin);
 
-  row.inMax = new QLineEdit(m_Cols->widget(col));
+  row.inMax = new LineEdit(m_Cols->widget(col));
   row.inMax->setToolTip(tr("Clip first outgoing OSC argument\n\nScale first outgoing OSC argument when all min/max fields populated"));
   TransformToString(dst.inMax, transformStr);
   row.inMax->setText(transformStr);
@@ -1121,12 +1197,12 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const E
   row.outActivity->Deactivate();
   AddCol(col++, row.outActivity, /*fixed*/ true);
 
-  row.outIP = new QLineEdit(m_Cols->widget(col));
+  row.outIP = new LineEdit(m_Cols->widget(col));
   row.outIP->setToolTip(tr("Route received packets to this IP address\n\nLeave blank to route packets to the same IP address they were sent from"));
   row.outIP->setText(dst.addr.ip);
   AddCol(col++, row.outIP);
 
-  row.outPort = new QLineEdit(m_Cols->widget(col));
+  row.outPort = new LineEdit(m_Cols->widget(col));
   row.outPort->setText((dst.addr.port == 0) ? QString() : QString::number(dst.addr.port));
   AddCol(col++, row.outPort);
 
@@ -1134,7 +1210,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const E
   connect(row.outProtocol, &ProtocolComboBox::protocolChanged, this, &RoutingWidget::onOutProtocolChanged);
   AddCol(col++, row.outProtocol);
 
-  row.outPath = new QLineEdit(m_Cols->widget(col));
+  row.outPath = new LineEdit(m_Cols->widget(col));
   row.outPath->setText(dst.path);
 
   row.outScriptText = new ScriptEdit(m_Cols->widget(col));
@@ -1152,13 +1228,13 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const E
   connect(row.outScript, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onOutScriptToggled);
   AddCol(col++, row.outScript, /*fixed*/ true);
 
-  row.outMin = new QLineEdit(m_Cols->widget(col));
+  row.outMin = new LineEdit(m_Cols->widget(col));
   row.outMin->setToolTip(tr("Clip first outgoing OSC argument\n\nScale first outgoing OSC argument when all min/max fields populated"));
   TransformToString(dst.outMin, transformStr);
   row.outMin->setText(transformStr);
   AddCol(col++, row.outMin);
 
-  row.outMax = new QLineEdit(m_Cols->widget(col));
+  row.outMax = new LineEdit(m_Cols->widget(col));
   row.outMax->setToolTip(tr("Clip first outgoing OSC argument\n\nScale first outgoing OSC argument when all min/max fields populated"));
   TransformToString(dst.outMax, transformStr);
   row.outMax->setText(transformStr);
