@@ -529,7 +529,7 @@ int RoutingCol::UpdateLayout()
     for (size_t w = 0; w < widgets.size(); ++w)
     {
       int h = widgets[w]->height();
-      widgets[w]->setGeometry(0, y + qRound((rowHeight - h) / 2.0), width(), h);
+      widgets[w]->setGeometry(0, y, width(), h);
     }
 
     y += rowHeight;
