@@ -26,6 +26,7 @@
 
 #define TEXT_COLOR QColor(220, 220, 220)
 #define MUTED_COLOR QColor(100, 100, 100)
+#define OFF_COLOR QColor(170, 124, 223)
 #define SUCCESS_COLOR QColor(16, 183, 87)
 #define ERROR_COLOR QColor(164, 66, 66)
 #define WARNING_COLOR QColor(172, 122, 57)

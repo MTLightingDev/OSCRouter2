@@ -462,11 +462,12 @@ private:
 
   void LoadLine(const QString& line, Router::ROUTES& routes, ItemStateTable& itemStateTable);
   void AddRow(size_t id, bool remove, const QString& label, const Router::sRoute& route);
-  void AddCol(int index, QWidget* w, bool fixed = false);
-  void AddCol(int index, const RoutingCol::Widgets& w, bool fixed = false);
+  void AddCol(int index, QWidget* w, bool fixed = false, bool fixedHeight = false);
+  void AddCol(int index, const RoutingCol::Widgets& w, bool fixed = false, bool fixedHeight = false);
   void UpdateItemState(const ItemState* itemState, Indicator& stateIndicator, Indicator& activityIndicator);
   void UpdateLayout();
   QRect RectForCol(Col col) const;
+  void UpdateMuteState();
 
   static QString HeaderForCol(Col col);
   static bool HasRoute(const Router::ROUTES& routes, const EosRouteSrc& src, const EosRouteDst& dst);

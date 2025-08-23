@@ -709,14 +709,19 @@ void TcpWidget::AddCol(int index, QWidget* w, int fixedW /*= -1*/)
   if (!col)
     return;
 
-  if (fixedW > 0 && col->empty())
+  if (fixedW > 0)
   {
-    if (index >= 0 && index < static_cast<int>(Col::kCount))
-      fixedW = qMax(fixedW, m_Headers[index]->sizeHint().width());
+    if (col->empty())
+    {
+      if (index >= 0 && index < static_cast<int>(Col::kCount))
+        fixedW = qMax(fixedW, m_Headers[index]->sizeHint().width());
 
-    col->setMinimumWidth(fixedW);
-    col->setMaximumWidth(fixedW);
+      col->setMinimumWidth(fixedW);
+      col->setMaximumWidth(fixedW);
+    }
   }
+  else if (index >= 0 && index < static_cast<int>(Col::kCount))
+    col->setMinimumWidth(qMax(w->minimumSizeHint().width(), m_Headers[index]->sizeHint().width()));
 
   col->AddWidgets({w});
 }
@@ -1014,6 +1019,7 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
   label->setFont(fnt);
   headerLayout->addWidget(label);
   m_Incoming.mute = new RoutingCheckBox(static_cast<int>(Col::kInMute), m_Incoming.base);
+  m_Incoming.mute->setToolTip(tr("Enable/Disable all incoming routes"));
   connect(m_Incoming.mute, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onMuteToggled);
   headerLayout->addWidget(m_Incoming.mute, 0, Qt::AlignCenter);
   headerLayout->addStretch(std::numeric_limits<int>::max());
@@ -1027,6 +1033,7 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
   label->setFont(fnt);
   headerLayout->addWidget(label);
   m_Outgoing.mute = new RoutingCheckBox(static_cast<int>(Col::kOutMute), m_Outgoing.base);
+  m_Outgoing.mute->setToolTip(tr("Enable/Disable all outgoing routes"));
   connect(m_Outgoing.mute, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onMuteToggled);
   headerLayout->addWidget(m_Outgoing.mute, 0, Qt::AlignCenter);
   headerLayout->addStretch(std::numeric_limits<int>::max());
@@ -1047,6 +1054,7 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
         label = new QLabel(HeaderForCol(static_cast<Col>(i)), header);
         headerLayout->addWidget(label);
         RoutingButton* button = new RoutingButton(QLatin1String("?"), static_cast<size_t>(i), header);
+        button->setToolTip(tr("Show Help..."));
         connect(button, &RoutingButton::clickedWithId, this, &RoutingWidget::onHeaderHelpClicked);
         int n = button->sizeHint().height();
         button->setFixedWidth(n);
@@ -1085,10 +1093,10 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
       case Col::kInIP:
       case Col::kOutIP: m_Cols->setStretchFactor(i, 3); break;
 
-      case Col::kDivider:
-        col->setMinimumWidth(48);
-        col->setMaximumWidth(48);
-        break;
+      //case Col::kDivider:
+      //  col->setMinimumWidth(48);
+      //  col->setMaximumWidth(48);
+      //  break;
 
       case Col::kInPath:
       case Col::kOutPath: m_Cols->setStretchFactor(i, 8); break;
@@ -1168,6 +1176,7 @@ void RoutingWidget::LoadRoutes(const Router::ROUTES& routes, const ItemStateTabl
   m_Cols->autoSize(nullptr);
 
   UpdateLayout();
+  UpdateMuteState();
 }
 
 void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const Router::sRoute& route)
@@ -1181,6 +1190,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
   AddCol(col++, row.label);
 
   row.inMute = new RoutingCheckBox(id, m_Cols->widget(col));
+  row.inMute->setToolTip(tr("Enable/Disable incoming traffic on this route"));
   row.inMute->setChecked(!route.srcMute);
   connect(row.inMute, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onInMuteToggled);
   AddCol(col++, row.inMute, /*fixed*/ true);
@@ -1217,7 +1227,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
 
   row.inProtocol = new ProtocolComboBox(id, route.src.protocol, m_Cols->widget(col));
   connect(row.inProtocol, &ProtocolComboBox::protocolChanged, this, &RoutingWidget::onInProtocolChanged);
-  AddCol(col++, row.inProtocol);
+  AddCol(col++, row.inProtocol, /*fixed*/ true);
 
   row.inPath = new LineEdit(m_Cols->widget(col));
   row.inPath->setText(route.src.path);
@@ -1248,10 +1258,11 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
   fnt.setPointSize(16);
   row.divider->setFont(fnt);
   row.divider->setAlignment(Qt::AlignCenter);
-  row.divider->setFixedHeight(fh);
-  AddCol(col++, row.divider);
+  row.divider->setFixedSize(48, fh);
+  AddCol(col++, row.divider, /*fixed*/ true);
 
   row.outMute = new RoutingCheckBox(id, m_Cols->widget(col));
+  row.outMute->setToolTip(tr("Enable/Disable outgoing traffic on this route"));
   row.outMute->setChecked(!route.dstMute);
   connect(row.outMute, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onOutMuteToggled);
   AddCol(col++, row.outMute, /*fixed*/ true);
@@ -1279,7 +1290,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
 
   row.outProtocol = new ProtocolComboBox(id, route.dst.protocol, m_Cols->widget(col));
   connect(row.outProtocol, &ProtocolComboBox::protocolChanged, this, &RoutingWidget::onOutProtocolChanged);
-  AddCol(col++, row.outProtocol);
+  AddCol(col++, row.outProtocol, /*fixed*/ true);
 
   row.outPath = new LineEdit(m_Cols->widget(col));
   row.outPath->setText(route.dst.path);
@@ -1318,7 +1329,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
   row.addRemove = new RoutingButton(remove ? QLatin1String("-") : QLatin1String("+"), id, m_Cols->widget(col));
   row.addRemove->setToolTip(tr("Add/Remove this route"));
   connect(row.addRemove, &RoutingButton::clickedWithId, this, &RoutingWidget::onAddRemoveClicked);
-  AddCol(col++, row.addRemove, /*fixed*/ true);
+  AddCol(col++, row.addRemove, /*fixed*/ true, /*fixedHeight*/ true);
 
   m_Rows.push_back(row);
 
@@ -1326,27 +1337,34 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
   onOutProtocolChanged(m_Rows.size() - 1, route.dst.protocol);
 }
 
-void RoutingWidget::AddCol(int index, QWidget* w, bool fixed /*= false*/)
+void RoutingWidget::AddCol(int index, QWidget* w, bool fixed /*= false*/, bool fixedHeight /*= false*/)
 {
   RoutingCol::Widgets widgets = {w};
-  AddCol(index, widgets, fixed);
+  AddCol(index, widgets, fixed, fixedHeight);
 }
 
-void RoutingWidget::AddCol(int index, const RoutingCol::Widgets& w, bool fixed /*= false*/)
+void RoutingWidget::AddCol(int index, const RoutingCol::Widgets& w, bool fixed /*= false*/, bool fixedHeight /*= false*/)
 {
   RoutingCol* col = qobject_cast<RoutingCol*>(m_Cols->widget(index));
   if (!col)
     return;
 
-  if (fixed && !w.empty() && col->empty())
+  if (!w.empty())
   {
-    int fw = qMin(w.front()->sizeHint().width(), w.front()->sizeHint().height());
+    if (fixed)
+    {
+      if (col->empty())
+      {
+        int fw = fixedHeight ? w.front()->sizeHint().height() : w.front()->sizeHint().width();
+        if (index >= 0 && index < static_cast<int>(Col::kCount))
+          fw = qMax(fw, m_Headers[index]->sizeHint().width());
 
-    if (index >= 0 && index < static_cast<int>(Col::kCount))
-      fw = qMax(fw, m_Headers[index]->sizeHint().width());
-
-    col->setMinimumWidth(fw);
-    col->setMaximumWidth(fw);
+        col->setMinimumWidth(fw);
+        col->setMaximumWidth(fw);
+      }
+    }
+    else if (index >= 0 && index < static_cast<int>(Col::kCount))
+      col->setMinimumWidth(qMax(w.front()->minimumSizeHint().width(), m_Headers[index]->sizeHint().width()));
   }
 
   col->AddWidgets(w);
@@ -1658,6 +1676,44 @@ QRect RoutingWidget::RectForCol(Col col) const
   return QRect(w->mapTo(this, QPoint(0, 0)), w->mapTo(this, QPoint(w->width() - 1, w->height() - 1)));
 }
 
+void SetMuted(QWidget* w, bool b)
+{
+  QPalette pal = w->palette();
+  pal.setColor(QPalette::Active, QPalette::WindowText, b ? OFF_COLOR : TEXT_COLOR);
+  pal.setColor(QPalette::Active, QPalette::ButtonText, b ? OFF_COLOR : TEXT_COLOR);
+  pal.setColor(QPalette::Active, QPalette::Text, b ? OFF_COLOR : TEXT_COLOR);
+  w->setPalette(pal);
+}
+
+void RoutingWidget::UpdateMuteState()
+{
+  bool muteAllIncoming = !m_Incoming.mute->isChecked();
+  bool muteAllOutgoing = !m_Outgoing.mute->isChecked();
+
+  for (size_t i = 0; i < m_Rows.size(); ++i)
+  {
+    Row& row = m_Rows[i];
+
+    bool mute = muteAllIncoming || !row.inMute->isChecked();
+
+    SetMuted(row.inIP, mute);
+    SetMuted(row.inPort, mute);
+    SetMuted(row.inProtocol, mute);
+    SetMuted(row.inPath, mute);
+    SetMuted(row.inMin, mute);
+    SetMuted(row.inMax, mute);
+
+    mute = muteAllOutgoing || !row.outMute->isChecked();
+
+    SetMuted(row.outIP, mute);
+    SetMuted(row.outPort, mute);
+    SetMuted(row.outProtocol, mute);
+    SetMuted(row.outPath, mute);
+    SetMuted(row.outMin, mute);
+    SetMuted(row.outMax, mute);
+  }
+}
+
 void RoutingWidget::onOutScriptToggled(size_t id, bool checked)
 {
   if (id >= m_Rows.size())
@@ -1670,6 +1726,7 @@ void RoutingWidget::onOutScriptToggled(size_t id, bool checked)
 
 void RoutingWidget::onMuteToggled(size_t id, bool checked)
 {
+  UpdateMuteState();
   emit muteToggled(static_cast<Col>(id) == Col::kInMute, checked);
 }
 
@@ -1678,6 +1735,7 @@ void RoutingWidget::onInMuteToggled(size_t row, bool checked)
   if (row >= m_Rows.size())
     return;
 
+  UpdateMuteState();
   emit routeMuteToggled(m_Rows[row].inItemStateTableId, checked);
 }
 
@@ -1686,6 +1744,7 @@ void RoutingWidget::onOutMuteToggled(size_t row, bool checked)
   if (row >= m_Rows.size())
     return;
 
+  UpdateMuteState();
   emit routeMuteToggled(m_Rows[row].outItemStateTableId, checked);
 }
 
