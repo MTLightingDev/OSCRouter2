@@ -1091,12 +1091,14 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
     {
       case Col::kLabel:
       case Col::kInIP:
-      case Col::kOutIP: m_Cols->setStretchFactor(i, 3); break;
+      case Col::kOutIP:
+        m_Cols->setStretchFactor(i, 3);
+        break;
 
-      //case Col::kDivider:
-      //  col->setMinimumWidth(48);
-      //  col->setMaximumWidth(48);
-      //  break;
+        // case Col::kDivider:
+        //   col->setMinimumWidth(48);
+        //   col->setMaximumWidth(48);
+        //   break;
 
       case Col::kInPath:
       case Col::kOutPath: m_Cols->setStretchFactor(i, 8); break;
@@ -1818,8 +1820,32 @@ void RoutingWidget::onHeaderHelpClicked(size_t id)
 
   m_Help.edit->setText(GetHelpText(static_cast<Col>(id), /*protocol*/ std::nullopt, /*script*/ true));
   m_Help.edit->document()->adjustSize();
-  m_Help.dialog->resize(m_Help.edit->document()->size().toSize() + QSize(20, 20));
 
+  // adjust to document size
+  QSize sz = m_Help.edit->document()->size().toSize() + QSize(20, 20);
+
+  // center on main window
+  QRect r(window()->geometry().center() - QPoint(sz.width() / 2, sz.height() / 2), sz);
+
+  // keep within screen bounds
+  QScreen* sc = screen();
+  if (sc)
+  {
+    QRect sr = sc->availableGeometry();
+    r.setSize(r.size().boundedTo(sr.size() - QSize(100, 100)));
+    int overflow = sr.right() - r.right();
+    if (overflow < 0)
+      r.translate(overflow, 0);
+    if (r.x() < sr.x())
+      r.moveTo(sr.x(), r.y());
+    overflow = sr.bottom() - r.bottom();
+    if (overflow < 0)
+      r.translate(0, overflow);
+    if (r.y() < sr.y())
+      r.moveTo(r.x(), sr.y());
+  }
+
+  m_Help.dialog->setGeometry(r);
   m_Help.dialog->show();
   m_Help.dialog->activateWindow();
 }
