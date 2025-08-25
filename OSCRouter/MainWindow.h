@@ -169,6 +169,30 @@ private:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+class MuteCheckBox : public QAbstractButton
+{
+  Q_OBJECT
+
+public:
+  MuteCheckBox(size_t id, QWidget* parent = nullptr);
+
+signals:
+  void toggledWithId(size_t id, bool checked);
+
+private slots:
+  void onToggled(bool checked);
+
+protected:
+  void paintEvent(QPaintEvent* event) override;
+
+private:
+  size_t m_Id = 0;
+  QPixmap m_Unchecked;
+  QPixmap m_Checked;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
 class SplitterHandle : public QSplitterHandle
 {
   Q_OBJECT
@@ -409,14 +433,14 @@ private:
   struct Header
   {
     QWidget* base = nullptr;
-    RoutingCheckBox* mute = nullptr;
+    MuteCheckBox* mute = nullptr;
   };
 
   struct Row
   {
     size_t id = 0;
     ItemStateTable::ID inItemStateTableId = ItemStateTable::sm_Invalid_Id;
-    RoutingCheckBox* mute = nullptr;
+    MuteCheckBox* mute = nullptr;
     LineEdit* label = nullptr;
     Indicator* inState = nullptr;
     Indicator* inActivity = nullptr;

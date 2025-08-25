@@ -388,6 +388,58 @@ void RoutingCheckBox::onToggled(bool checked)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+MuteCheckBox::MuteCheckBox(size_t id, QWidget* parent /*= nullptr*/)
+  : QAbstractButton(parent)
+  , m_Id(id)
+{
+  setCheckable(true);
+  setFixedSize(24, 24);
+  connect(this, &QAbstractButton::toggled, this, &MuteCheckBox::onToggled);
+}
+
+void MuteCheckBox::onToggled(bool checked)
+{
+  emit toggledWithId(m_Id, checked);
+}
+
+void MuteCheckBox::paintEvent(QPaintEvent* /*event*/)
+{
+  QPainter painter(this);
+
+  if (underMouse())
+    painter.fillRect(rect(), palette().color(QPalette::Window).lighter());
+
+  static QIcon iconUnchecked(QLatin1String(":/qt/etc/NetworkOn.svg"));
+  static QIcon iconChecked(QLatin1String(":/qt/etc/NetworkOff.svg"));
+
+  QIcon& icon = (isChecked() ? iconChecked : iconUnchecked);
+  if (icon.isNull())
+    return;
+
+  QPixmap& pixmap = (isChecked() ? m_Checked : m_Unchecked);
+
+  int s = qMin(width(), height());
+  QSize ps(s, s);
+
+  if (pixmap.isNull() || pixmap.size() != ps)
+  {
+    pixmap = icon.pixmap(ps);
+    if (pixmap.size() != ps)
+      pixmap = pixmap.scaled(ps, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+  }
+
+  if (pixmap.isNull())
+    return;
+
+  ps = pixmap.size();
+  if (pixmap.devicePixelRatio() > 0 && !qFuzzyIsNull(pixmap.devicePixelRatio()))
+    ps = QSize(qRound(ps.width() / pixmap.devicePixelRatio()), qRound(ps.height() / pixmap.devicePixelRatio()));
+
+  painter.drawPixmap(qRound((width() - ps.width()) / 2.0), qRound((height() - ps.width()) / 2.0), pixmap);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 SplitterHandle::SplitterHandle(Qt::Orientation orientation, QSplitter* parent)
   : QSplitterHandle(orientation, parent)
 {
@@ -1018,9 +1070,9 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
   fnt.setPointSize(12);
   label->setFont(fnt);
   headerLayout->addWidget(label);
-  m_Incoming.mute = new RoutingCheckBox(0, m_Incoming.base);
-  m_Incoming.mute->setToolTip(tr("Enable/Disable all incoming routes"));
-  connect(m_Incoming.mute, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onMuteToggled);
+  m_Incoming.mute = new MuteCheckBox(0, m_Incoming.base);
+  m_Incoming.mute->setToolTip(tr("Mute all running input"));
+  connect(m_Incoming.mute, &MuteCheckBox::toggledWithId, this, &RoutingWidget::onMuteToggled);
   headerLayout->addWidget(m_Incoming.mute, 0, Qt::AlignCenter);
   headerLayout->addStretch(std::numeric_limits<int>::max());
 
@@ -1032,9 +1084,9 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
   label = new QLabel(tr("Outgoing"), m_Outgoing.base);
   label->setFont(fnt);
   headerLayout->addWidget(label);
-  m_Outgoing.mute = new RoutingCheckBox(1, m_Outgoing.base);
-  m_Outgoing.mute->setToolTip(tr("Enable/Disable all outgoing routes"));
-  connect(m_Outgoing.mute, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onMuteToggled);
+  m_Outgoing.mute = new MuteCheckBox(1, m_Outgoing.base);
+  m_Outgoing.mute->setToolTip(tr("Mute all running output"));
+  connect(m_Outgoing.mute, &MuteCheckBox::toggledWithId, this, &RoutingWidget::onMuteToggled);
   headerLayout->addWidget(m_Outgoing.mute, 0, Qt::AlignCenter);
   headerLayout->addStretch(std::numeric_limits<int>::max());
 
@@ -1127,7 +1179,7 @@ QString RoutingWidget::HeaderForCol(Col col)
 {
   switch (col)
   {
-    case Col::kMute: return tr("On");
+    case Col::kMute: return tr("Mute");
 
     case Col::kLabel: return tr("Name");
 
@@ -1160,11 +1212,11 @@ void RoutingWidget::LoadRoutes(const Router::ROUTES& routes, const ItemStateTabl
   Clear();
 
   bool b = m_Incoming.mute->blockSignals(true);
-  m_Incoming.mute->setChecked(!itemStateTable.GetMuteAllIncoming());
+  m_Incoming.mute->setChecked(itemStateTable.GetMuteAllIncoming());
   m_Incoming.mute->blockSignals(b);
 
   b = m_Outgoing.mute->blockSignals(true);
-  m_Outgoing.mute->setChecked(!itemStateTable.GetMuteAllOutgoing());
+  m_Outgoing.mute->setChecked(itemStateTable.GetMuteAllOutgoing());
   m_Outgoing.mute->blockSignals(b);
 
   size_t id = 0;
@@ -1187,10 +1239,10 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
   Row row;
   row.id = id;
 
-  row.mute = new RoutingCheckBox(id, m_Cols->widget(col));
-  row.mute->setToolTip(tr("Enable/Disable this route"));
-  row.mute->setChecked(!route.mute);
-  connect(row.mute, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onMuteRouteToggled);
+  row.mute = new MuteCheckBox(id, m_Cols->widget(col));
+  row.mute->setToolTip(tr("Temporarily mute running route"));
+  row.mute->setChecked(route.mute);
+  connect(row.mute, &MuteCheckBox::toggledWithId, this, &RoutingWidget::onMuteRouteToggled);
   AddCol(col++, row.mute, /*fixed*/ true);
 
   row.label = new LineEdit(label, m_Cols->widget(col));
@@ -1478,8 +1530,8 @@ void RoutingWidget::SaveRoutes(Router::ROUTES& routes, ItemStateTable& itemState
 
   itemStateTable.Clear();
 
-  itemStateTable.SetMuteAllIncoming(!m_Incoming.mute->isChecked());
-  itemStateTable.SetMuteAllOutgoing(!m_Outgoing.mute->isChecked());
+  itemStateTable.SetMuteAllIncoming(m_Incoming.mute->isChecked());
+  itemStateTable.SetMuteAllOutgoing(m_Outgoing.mute->isChecked());
 
   // show state/activity per EosAddr
   AddrStates srcAddrStates;
@@ -1494,7 +1546,7 @@ void RoutingWidget::SaveRoutes(Router::ROUTES& routes, ItemStateTable& itemState
     if (route.src.addr.port == 0)
       continue;  // port required
 
-    route.mute = !row.mute->isChecked();
+    route.mute = row.mute->isChecked();
     route.label = row.label->text();
 
     QStringList ips = row.inIP->text().split(QLatin1Char(','));
@@ -1533,7 +1585,7 @@ void RoutingWidget::SaveRoutes(Router::ROUTES& routes, ItemStateTable& itemState
 
     j = dstAddrStates.find(route.dst.addr);
     if (j == dstAddrStates.end())
-      dstAddrStates[route.dst.addr] = route.dstItemStateTableId = itemStateTable.Register(!row.mute->isChecked());
+      dstAddrStates[route.dst.addr] = route.dstItemStateTableId = itemStateTable.Register(row.mute->isChecked());
     else
       route.dstItemStateTableId = j->second;
     row.outItemStateTableId = route.dstItemStateTableId;
@@ -1687,14 +1739,14 @@ void SetMuted(QWidget* w, bool b)
 
 void RoutingWidget::UpdateMuteState()
 {
-  bool muteAllIncoming = !m_Incoming.mute->isChecked();
-  bool muteAllOutgoing = !m_Outgoing.mute->isChecked();
+  bool muteAllIncoming = m_Incoming.mute->isChecked();
+  bool muteAllOutgoing = m_Outgoing.mute->isChecked();
 
   for (size_t i = 0; i < m_Rows.size(); ++i)
   {
     Row& row = m_Rows[i];
 
-    bool muteRoute = !row.mute->isChecked();
+    bool muteRoute = row.mute->isChecked();
     bool mute = muteAllIncoming || muteRoute;
 
     SetMuted(row.inIP, mute);
@@ -2608,9 +2660,9 @@ void MainWindow::onApplyClicked(bool /*checked*/)
 void MainWindow::onMuteToggled(bool incoming, bool checked)
 {
   if (incoming)
-    m_ItemStateTable.SetMuteAllIncoming(!checked);
+    m_ItemStateTable.SetMuteAllIncoming(checked);
   else
-    m_ItemStateTable.SetMuteAllOutgoing(!checked);
+    m_ItemStateTable.SetMuteAllOutgoing(checked);
 
   if (m_Unsaved)
     return;
@@ -2621,7 +2673,7 @@ void MainWindow::onMuteToggled(bool incoming, bool checked)
 
 void MainWindow::onMuteRouteToggled(size_t id, bool checked)
 {
-  m_ItemStateTable.Mute(id, !checked);
+  m_ItemStateTable.Mute(id, checked);
 
   if (m_Unsaved)
     return;
