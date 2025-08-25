@@ -441,6 +441,7 @@ protected:
     UNIVERSE_NUMBER_SET dirtyUniverses;
     SACN_SOURCE_LIST sources;
     UNIVERSE_LIST merged;
+    EosLog log;
   };
 
   struct SendUniverseData
@@ -512,6 +513,7 @@ protected:
   virtual void SetItemState(const ROUTES_BY_IP &routesByIp, ItemState::EnumState state);
   virtual void SetItemState(const ROUTES_BY_PATH &routesByPath, ItemState::EnumState state);
   virtual void SetItemActivity(ItemStateTable::ID id);
+  virtual void DestroysACN(sACN &sacn);
 
   // OSCParserClient
   virtual void OSCParserClient_Log(const std::string &message);
@@ -528,7 +530,6 @@ protected:
 
   static bool HasProtocolOutput(const ROUTES_BY_PORT &routesByPort, Protocol protocol);
   static bool HasProtocolOutput(const ROUTES_BY_PATH &routesByPath, Protocol protocol);
-  static void DestroysACN(sACN &sacn);
 };
 
 ////////////////////////////////////////////////////////////////////////////////

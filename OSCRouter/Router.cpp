@@ -1276,18 +1276,21 @@ void RouterThread::DestroysACN(sACN &sacn)
   {
     IPlatformStreamACNSrv::DestroyInstance(sacn.server);
     sacn.server = nullptr;
+    m_PrivateLog.AddInfo(QLatin1String("sACN server destroyed").toUtf8().constData());
   }
 
   if (sacn.client)
   {
     IPlatformStreamACNCli::DestroyInstance(sacn.client);
     sacn.client = nullptr;
+    m_PrivateLog.AddInfo(QLatin1String("sACN client destroyed").toUtf8().constData());
   }
 
   if (sacn.net)
   {
     IPlatformAsyncSocketServ::DestroyInstance(sacn.net);
     sacn.net = nullptr;
+    m_PrivateLog.AddInfo(QLatin1String("sACN networking destroyed").toUtf8().constData());
   }
 
   sacn.output.clear();
@@ -1303,11 +1306,23 @@ void RouterThread::BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &route
     return;
 
   sacn.net = IPlatformAsyncSocketServ::CreateInstance();
-  if (!sacn.net)
-    return;
-
-  if (!sacn.net->Startup())
+  if (sacn.net)
   {
+    m_PrivateLog.AddInfo(QLatin1String("sACN networking created").toUtf8().constData());
+  }
+  else
+  {
+    m_PrivateLog.AddError(QLatin1String("sACN networking creation failed").toUtf8().constData());
+    return;
+  }
+
+  if (sacn.net->Startup())
+  {
+    m_PrivateLog.AddInfo(QLatin1String("sACN networking started").toUtf8().constData());
+  }
+  else
+  {
+    m_PrivateLog.AddError(QLatin1String("sACN networking startup failed").toUtf8().constData());
     DestroysACN(sacn);
     return;
   }
@@ -1317,25 +1332,38 @@ void RouterThread::BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &route
     sacn.client = IPlatformStreamACNCli::CreateInstance();
     if (sacn.client)
     {
+      m_PrivateLog.AddInfo(QLatin1String("sACN client created").toUtf8().constData());
+
       if (sacn.client->Startup(sacn.net, this))
       {
+        m_PrivateLog.AddInfo(QLatin1String("sACN client started").toUtf8().constData());
+
         for (ROUTES_BY_PORT::const_iterator universeIter = routesBysACNUniverse.begin(); universeIter != routesBysACNUniverse.end(); ++universeIter)
         {
           uint16_t universeNumber = universeIter->first;
           const ROUTES_BY_IP &routesByIp = universeIter->second;
 
           if (sacn.client->ListenUniverse(universeNumber, nullptr, 0))
+          {
             SetItemState(routesByIp, ItemState::STATE_CONNECTED);
+            m_PrivateLog.AddInfo(QStringLiteral("sACN client listening on universe %1").arg(universeNumber).toUtf8().constData());
+          }
           else
+          {
             SetItemState(routesByIp, ItemState::STATE_NOT_CONNECTED);
+            m_PrivateLog.AddError(QStringLiteral("sACN client listen on universe %1 failed").arg(universeNumber).toUtf8().constData());
+          }
         }
       }
       else
       {
         IPlatformStreamACNCli::DestroyInstance(sacn.client);
         sacn.client = nullptr;
+        m_PrivateLog.AddError(QLatin1String("sACN client startup failed").toUtf8().constData());
       }
     }
+    else
+      m_PrivateLog.AddError(QLatin1String("sACN client creation failed").toUtf8().constData());
   }
 
   if (hasOutput)
@@ -1343,12 +1371,21 @@ void RouterThread::BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &route
     sacn.server = IPlatformStreamACNSrv::CreateInstance();
     if (sacn.server)
     {
-      if (!sacn.server->Startup(sacn.net))
+      m_PrivateLog.AddInfo(QLatin1String("sACN server created").toUtf8().constData());
+
+      if (sacn.server->Startup(sacn.net))
+      {
+        m_PrivateLog.AddInfo(QLatin1String("sACN server started").toUtf8().constData());
+      }
+      else
       {
         IPlatformStreamACNSrv::DestroyInstance(sacn.server);
         sacn.server = nullptr;
+        m_PrivateLog.AddError(QLatin1String("sACN server startup failed").toUtf8().constData());
       }
     }
+    else
+      m_PrivateLog.AddError(QLatin1String("sACN server creation failed").toUtf8().constData());
   }
 
   if (!sacn.client && !sacn.server)
@@ -1902,6 +1939,8 @@ bool RouterThread::SendsACN(sACN &sacn, const EosRouteDst &dst, EosPacket &osc)
                 universe.dmx.handle = handle;
                 universe.dmx.channels = pslots;
                 dirty = true;
+
+                m_PrivateLog.AddInfo(QStringLiteral("created sACN dmx output universe %1").arg(universeNumber).toUtf8().constData());
               }
             }
 
@@ -1920,6 +1959,8 @@ bool RouterThread::SendsACN(sACN &sacn, const EosRouteDst &dst, EosPacket &osc)
                     universe.channelPriority.handle = handle;
                     universe.channelPriority.channels = pslots;
                     initialize = true;
+
+                    m_PrivateLog.AddInfo(QStringLiteral("created sACN per channel priority output universe %1").arg(universeNumber).toUtf8().constData());
                   }
                 }
 
@@ -1944,6 +1985,8 @@ bool RouterThread::SendsACN(sACN &sacn, const EosRouteDst &dst, EosPacket &osc)
               {
                 sacn.server->DestroyUniverse(universe.channelPriority.handle);
                 universe.channelPriority = SendUniverseData();
+
+                m_PrivateLog.AddInfo(QStringLiteral("destroyed sACN per channel priority output universe %1").arg(universeNumber).toUtf8().constData());
               }
 
               // update dmx
@@ -2067,7 +2110,7 @@ void RouterThread::MakeSendPath(const EosAddr &addr, Protocol protocol, const QS
     if (sendPath.isEmpty() && protocol == Protocol::ksACN)
       sendPath = QStringLiteral("/sacn=%1");
 
-    if (dstPath.contains('%'))
+    if (sendPath.contains('%'))
     {
       // possible in-line path replacements:
       // %1  => srcPath[0]
@@ -2154,7 +2197,7 @@ void RouterThread::MakeSendPath(const EosAddr &addr, Protocol protocol, const QS
 
               if (insertStr.isEmpty())
               {
-                QString msg = QString("Unable to remap %1 => %2, invalid replacement index %3").arg(srcPath).arg(dstPath).arg(srcPathIndex + 1);
+                QString msg = QString("Unable to remap %1 => %2, invalid replacement index %3").arg(srcPath).arg(sendPath).arg(srcPathIndex + 1);
                 m_PrivateLog.AddWarning(msg.toUtf8().constData());
                 sendPath.clear();
                 return;
@@ -2544,7 +2587,7 @@ void RouterThread::RecvsACN(sACN &sacn, EosUdpInThread::RECV_PORT_Q &recvQ)
         if (merged.hasPerChannelPriority)
         {
           merged.channelPriority = universe.channelPriority;
-          merged.channelIp = universe.channelIp;
+          merged.channelIp.fill(universe.ip);
         }
         else
         {
@@ -2635,6 +2678,9 @@ void RouterThread::RecvsACN(sACN &sacn, EosUdpInThread::RECV_PORT_Q &recvQ)
   }
 
   m_sACNRecv.dirtyUniverses.clear();
+
+  m_PrivateLog.AddLog(m_sACNRecv.log);
+  m_sACNRecv.log.Clear();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2663,6 +2709,10 @@ void RouterThread::SourceDisappeared(const CID &source, uint2 universe)
   if (universeIter == recvSource.universes.end())
     return;
 
+  char str[CID::CIDSTRINGBYTES];
+  CID::CIDIntoString(source, str);
+  m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source disappeared: %2").arg(universe).arg(str).toUtf8().constData());
+
   recvSource.universes.erase(universeIter);
   m_sACNRecv.dirtyUniverses.insert(universe);
 
@@ -2689,6 +2739,10 @@ void RouterThread::SourcePCPExpired(const CID &source, uint2 universe)
   if (!recvUniverse.hasPerChannelPriority)
     return;
 
+  char str[CID::CIDSTRINGBYTES];
+  CID::CIDIntoString(source, str);
+  m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority source expired: %2").arg(universe).arg(str).toUtf8().constData());
+
   recvUniverse.hasPerChannelPriority = false;
   m_sACNRecv.dirtyUniverses.insert(universe);
 }
@@ -2703,9 +2757,46 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
   sACNSource &recvSource = m_sACNRecv.sources[source];
   recvSource.ip = source_ip.GetV4Address();
 
-  Universe &recvUniverse = recvSource.universes[universe];
+  std::pair<UNIVERSE_LIST::iterator, bool> result = recvSource.universes.insert(std::make_pair(universe, Universe()));
+  Universe &recvUniverse = result.first->second;
   if (start_code == STARTCODE_DMX)
   {
+    if (result.second)
+    {
+      char cidStr[CID::CIDSTRINGBYTES];
+      CID::CIDIntoString(source, cidStr);
+
+      char ipStr[CIPAddr::ADDRSTRINGBYTES];
+      CIPAddr::AddrIntoString(source_ip, ipStr, /*showport*/ false, /*showint*/ false);
+
+      m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source appeared: %2 priority: %3 ip: %4").arg(universe).arg(cidStr).arg(priority).arg(ipStr).toUtf8().constData());
+    }
+    else
+    {
+      if (recvUniverse.priority != priority)
+      {
+        char str[CID::CIDSTRINGBYTES];
+        CID::CIDIntoString(source, str);
+        m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source priority changed: %2 priority: %3 -> %4").arg(universe).arg(str).arg(recvUniverse.priority).arg(priority).toUtf8().constData());
+      }
+
+      if (recvUniverse.ip != recvSource.ip)
+      {
+        char cidStr[CID::CIDSTRINGBYTES];
+        CID::CIDIntoString(source, cidStr);
+
+        char ipStrOld[CIPAddr::ADDRSTRINGBYTES];
+        CIPAddr old_addr;
+        old_addr.SetV4Address(recvUniverse.ip);
+        CIPAddr::AddrIntoString(old_addr, ipStrOld, /*showport*/ false, /*showint*/ false);
+
+        char ipStrNew[CIPAddr::ADDRSTRINGBYTES];
+        CIPAddr::AddrIntoString(source_ip, ipStrNew, /*showport*/ false, /*showint*/ false);
+
+        m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source ip changed: %2 priority: %3 -> %4").arg(universe).arg(cidStr).arg(ipStrOld).arg(ipStrNew).toUtf8().constData());
+      }
+    }
+
     recvUniverse.priority = priority;
     recvUniverse.ip = recvSource.ip;
     m_sACNRecv.dirtyUniverses.insert(universe);
@@ -2715,12 +2806,25 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
   }
   else if (start_code == STARTCODE_PRIORITY)
   {
+    if (result.second)
+    {
+      char cidStr[CID::CIDSTRINGBYTES];
+      CID::CIDIntoString(source, cidStr);
+
+      char ipStr[CIPAddr::ADDRSTRINGBYTES];
+      CIPAddr::AddrIntoString(source_ip, ipStr, /*showport*/ false, /*showint*/ false);
+
+      m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority source appeared: %2 ip: %3").arg(universe).arg(cidStr).arg(ipStr).toUtf8().constData());
+    }
+
     recvUniverse.hasPerChannelPriority = true;
     recvUniverse.ip = recvSource.ip;
     m_sACNRecv.dirtyUniverses.insert(universe);
 
     if (slot_count != 0 && pdata)
       memcpy(recvUniverse.channelPriority.data(), pdata, std::min(recvUniverse.channelPriority.size(), static_cast<size_t>(slot_count)));
+    else if (result.second)
+      recvUniverse.channelPriority.fill(0);
   }
 }
 
