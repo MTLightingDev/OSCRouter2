@@ -419,9 +419,12 @@ protected:
     bool hasPerChannelPriority = false;
     std::array<uint8_t, UNIVERSE_SIZE> dmx;
     std::array<uint8_t, UNIVERSE_SIZE> channelPriority;
-    std::array<unsigned int, UNIVERSE_SIZE> channelIp;
 
-    Universe() { dmx.fill(0); }
+    Universe()
+    {
+      dmx.fill(0);
+      channelPriority.fill(0);
+    }
   };
 
   typedef std::map<uint16_t, Universe> UNIVERSE_LIST;
@@ -429,6 +432,7 @@ protected:
   struct sACNSource
   {
     unsigned int ip = 0;
+    QString name;
     UNIVERSE_LIST universes;
   };
 

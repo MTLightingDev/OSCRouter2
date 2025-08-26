@@ -2582,36 +2582,32 @@ void RouterThread::RecvsACN(sACN &sacn, EosUdpInThread::RECV_PORT_Q &recvQ)
       if (activeUniverses.insert(universeNumber).second)
       {
         // fist instance of this universe
+        merged.ip = universe.ip;
         merged.dmx = universe.dmx;
         merged.hasPerChannelPriority = universe.hasPerChannelPriority;
         if (merged.hasPerChannelPriority)
-        {
           merged.channelPriority = universe.channelPriority;
-          merged.channelIp.fill(universe.ip);
-        }
         else
-        {
           merged.priority = universe.priority;
-          merged.ip = universe.ip;
-        }
       }
       else if (universe.hasPerChannelPriority)
       {
-        // merge with existing universe (per channel priority)
         if (merged.hasPerChannelPriority)
         {
+          // merge per channel priority universe with existing per channel priority universe
           for (int channel = 0; channel < UNIVERSE_SIZE; ++channel)
           {
             if (universe.channelPriority[channel] > merged.channelPriority[channel])
             {
               merged.dmx[channel] = universe.dmx[channel];
               merged.channelPriority[channel] = universe.channelPriority[channel];
-              merged.channelIp[channel] = universe.channelIp[channel];
+              merged.ip = universe.ip;
             }
           }
         }
         else
         {
+          // merge per channel priority unviverse with basic priority universe
           merged.hasPerChannelPriority = true;
           for (int channel = 0; channel < UNIVERSE_SIZE; ++channel)
           {
@@ -2619,33 +2615,31 @@ void RouterThread::RecvsACN(sACN &sacn, EosUdpInThread::RECV_PORT_Q &recvQ)
             {
               merged.dmx[channel] = universe.dmx[channel];
               merged.channelPriority[channel] = universe.channelPriority[channel];
-              merged.channelIp[channel] = universe.channelIp[channel];
+              merged.ip = universe.ip;
             }
             else
-            {
               merged.channelPriority[channel] = merged.priority;
-              merged.channelIp[channel] = merged.ip;
-            }
           }
         }
       }
       else
       {
-        // merge with existing universe (per universe priority)
         if (merged.hasPerChannelPriority)
         {
+          // merge basic priority universe with existing per channel priority universe
           for (int channel = 0; channel < UNIVERSE_SIZE; ++channel)
           {
             if (universe.priority > merged.channelPriority[channel])
             {
               merged.dmx[channel] = universe.dmx[channel];
               merged.channelPriority[channel] = universe.priority;
-              merged.channelIp[channel] = universe.ip;
+              merged.ip = universe.ip;
             }
           }
         }
         else if (universe.priority > merged.priority)
         {
+          // merge basic priority universe with existing basic priority universe
           merged.dmx = universe.dmx;
           merged.priority = universe.priority;
           merged.ip = universe.ip;
@@ -2711,7 +2705,7 @@ void RouterThread::SourceDisappeared(const CID &source, uint2 universe)
 
   char str[CID::CIDSTRINGBYTES];
   CID::CIDIntoString(source, str);
-  m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source disappeared: %2").arg(universe).arg(str).toUtf8().constData());
+  m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source disappeared: %2 {%3}").arg(universe).arg(recvSource.name).arg(str).toUtf8().constData());
 
   recvSource.universes.erase(universeIter);
   m_sACNRecv.dirtyUniverses.insert(universe);
@@ -2741,7 +2735,7 @@ void RouterThread::SourcePCPExpired(const CID &source, uint2 universe)
 
   char str[CID::CIDSTRINGBYTES];
   CID::CIDIntoString(source, str);
-  m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority source expired: %2").arg(universe).arg(str).toUtf8().constData());
+  m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority source expired: %2 {%3}").arg(universe).arg(recvSource.name).arg(str).toUtf8().constData());
 
   recvUniverse.hasPerChannelPriority = false;
   m_sACNRecv.dirtyUniverses.insert(universe);
@@ -2749,13 +2743,15 @@ void RouterThread::SourcePCPExpired(const CID &source, uint2 universe)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void RouterThread::UniverseData(const CID &source, const char * /*source_name*/, const CIPAddr &source_ip, uint2 universe, uint2 /*reserved*/, uint1 /*sequence*/, uint1 /*options*/, uint1 priority,
+void RouterThread::UniverseData(const CID &source, const char *source_name, const CIPAddr &source_ip, uint2 universe, uint2 /*reserved*/, uint1 /*sequence*/, uint1 /*options*/, uint1 priority,
                                 uint1 start_code, uint2 slot_count, uint1 *pdata)
 {
   QMutexLocker locker(&m_sACNRecv.mutex);
 
   sACNSource &recvSource = m_sACNRecv.sources[source];
   recvSource.ip = source_ip.GetV4Address();
+  if (source_name)
+    recvSource.name = QString::fromUtf8(source_name);
 
   std::pair<UNIVERSE_LIST::iterator, bool> result = recvSource.universes.insert(std::make_pair(universe, Universe()));
   Universe &recvUniverse = result.first->second;
@@ -2769,7 +2765,8 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
       char ipStr[CIPAddr::ADDRSTRINGBYTES];
       CIPAddr::AddrIntoString(source_ip, ipStr, /*showport*/ false, /*showint*/ false);
 
-      m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source appeared: %2 priority: %3, ip: %4").arg(universe).arg(cidStr).arg(priority).arg(ipStr).toUtf8().constData());
+      m_sACNRecv.log.AddInfo(
+          QStringLiteral("sACN universe %1 source appeared: %2 {%3} priority: %4, ip: %5").arg(universe).arg(recvSource.name).arg(cidStr).arg(priority).arg(ipStr).toUtf8().constData());
     }
     else
     {
@@ -2777,7 +2774,14 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
       {
         char str[CID::CIDSTRINGBYTES];
         CID::CIDIntoString(source, str);
-        m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source priority changed: %2, priority: %3 -> %4").arg(universe).arg(str).arg(recvUniverse.priority).arg(priority).toUtf8().constData());
+        m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source priority changed: %2 {%3}, priority: %4 -> %5")
+                                   .arg(universe)
+                                   .arg(recvSource.name)
+                                   .arg(str)
+                                   .arg(recvUniverse.priority)
+                                   .arg(priority)
+                                   .toUtf8()
+                                   .constData());
       }
 
       if (recvUniverse.ip != recvSource.ip)
@@ -2793,7 +2797,8 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
         char ipStrNew[CIPAddr::ADDRSTRINGBYTES];
         CIPAddr::AddrIntoString(source_ip, ipStrNew, /*showport*/ false, /*showint*/ false);
 
-        m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 source ip changed: %2, ip: %3 -> %4").arg(universe).arg(cidStr).arg(ipStrOld).arg(ipStrNew).toUtf8().constData());
+        m_sACNRecv.log.AddInfo(
+            QStringLiteral("sACN universe %1 source ip changed: %2 {%3}, ip: %4 -> %5").arg(universe).arg(recvSource.name).arg(cidStr).arg(ipStrOld).arg(ipStrNew).toUtf8().constData());
       }
     }
 
@@ -2806,17 +2811,21 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
   }
   else if (start_code == STARTCODE_PRIORITY)
   {
-    if (result.second || !recvUniverse.hasPerChannelPriority)
+    if (result.second)
     {
-      recvUniverse.channelPriority.fill(0);
-
       char cidStr[CID::CIDSTRINGBYTES];
       CID::CIDIntoString(source, cidStr);
 
       char ipStr[CIPAddr::ADDRSTRINGBYTES];
       CIPAddr::AddrIntoString(source_ip, ipStr, /*showport*/ false, /*showint*/ false);
 
-      m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority source appeared: %2 ip: %3").arg(universe).arg(cidStr).arg(ipStr).toUtf8().constData());
+      m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority source appeared: %2 {%3}, ip: %4").arg(universe).arg(recvSource.name).arg(cidStr).arg(ipStr).toUtf8().constData());
+    }
+    else if (!recvUniverse.hasPerChannelPriority)
+    {
+      char str[CID::CIDSTRINGBYTES];
+      CID::CIDIntoString(source, str);
+      m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 changed to per channel priority: %2 {%3}").arg(universe).arg(recvSource.name).arg(str).toUtf8().constData());
     }
     else if (recvUniverse.ip != recvSource.ip)
     {
@@ -2831,7 +2840,8 @@ void RouterThread::UniverseData(const CID &source, const char * /*source_name*/,
       char ipStrNew[CIPAddr::ADDRSTRINGBYTES];
       CIPAddr::AddrIntoString(source_ip, ipStrNew, /*showport*/ false, /*showint*/ false);
 
-      m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority ip changed: %2, ip: %3 -> %4").arg(universe).arg(cidStr).arg(ipStrOld).arg(ipStrNew).toUtf8().constData());
+      m_sACNRecv.log.AddInfo(
+          QStringLiteral("sACN universe %1 per channel priority ip changed: %2 {%3}, ip: %4 -> %5").arg(universe).arg(recvSource.name).arg(cidStr).arg(ipStrOld).arg(ipStrNew).toUtf8().constData());
     }
 
     recvUniverse.hasPerChannelPriority = true;
