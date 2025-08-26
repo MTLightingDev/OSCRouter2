@@ -22,6 +22,7 @@
 #include "NetworkUtils.h"
 #include "EosPlatform.h"
 #include "LogWidget.h"
+#include "Version.h"
 #include <time.h>
 
 #ifdef WIN32
@@ -34,7 +35,6 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#define APP_VERSION "0.21"
 #define SETTING_LOG_DEPTH "LogDepth"
 #define SETTING_FILE_DEPTH "FileDepth"
 #define SETTING_LAST_FILE "LastFile"
@@ -2307,7 +2307,7 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
   m_LogWidget->setPalette(pal);
   logLayout->addWidget(m_LogWidget, 0, 0);
 
-  m_Log.AddInfo(QString("OSCRouter v%1").arg(APP_VERSION).toUtf8().constData());
+  m_Log.AddInfo(QString("OSCRouter %1.%2").arg(OSCROUTER_VERSION_MAJOR).arg(OSCROUTER_VERSION_MINOR).toUtf8().constData());
 
   m_RoutingWidget->LoadRoutes(Router::ROUTES(), ItemStateTable());
   m_TcpWidget->LoadConnections(Router::CONNECTIONS());
@@ -2474,10 +2474,10 @@ void MainWindow::GetPersistentSavePath(QString& path) const
 
 void MainWindow::UpdateWindowTitle()
 {
-  QString title(tr("OSCRouter"));
+  QString title(QStringLiteral("OSCRouter %1.%2").arg(OSCROUTER_VERSION_MAJOR).arg(OSCROUTER_VERSION_MINOR));
   if (!m_FilePath.isEmpty())
   {
-    title.append(" :: ");
+    title.append(" - ");
     if (m_Unsaved)
       title.append("*");
     title.append(QDir::toNativeSeparators(m_FilePath));

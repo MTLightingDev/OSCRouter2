@@ -269,6 +269,9 @@
     <ClInclude Include="..\sACN\Network_Common\Tock\tock.h">
       <Filter>sACN\Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Version.h">
+      <Filter>OSCRouter\Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="MainWindow.h">

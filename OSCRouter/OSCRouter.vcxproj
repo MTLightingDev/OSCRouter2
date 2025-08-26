@@ -167,6 +167,7 @@
     <ClInclude Include="EosPlatform.h" />
     <ClInclude Include="ItemState.h" />
     <ClInclude Include="LeakWatcher.h" />
+    <ClInclude Include="Version.h" />
     <CustomBuild Include="LogWidget.h" />
     <ClInclude Include="NetworkUtils.h" />
     <ClInclude Include="resource.h" />
