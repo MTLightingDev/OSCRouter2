@@ -2303,15 +2303,12 @@ bool RouterThread::SendArtNet(ArtNet &artnet, const EosAddr &addr, Protocol prot
 
   if (offset < ARTNET_DMX_LENGTH)
   {
-    bool dirty = false;
-
     ArtNetSendUniverse *universe = nullptr;
     ARTNET_SEND_UNIVERSE_LIST::iterator universeIter = artnet.output.find(universeNumber);
     if (universeIter == artnet.output.end())
     {
       m_PrivateLog.AddInfo(QStringLiteral("created ArtNet dmx output universe %1").arg(universeNumber).toUtf8().constData());
       universe = &artnet.output[universeNumber];
-      dirty = true;
     }
     else
       universe = &universeIter->second;
@@ -2333,7 +2330,7 @@ bool RouterThread::SendArtNet(ArtNet &artnet, const EosAddr &addr, Protocol prot
         if (universe->dmx[channel] != value)
         {
           universe->dmx[channel] = value;
-          dirty = true;
+          universe->dirty = true;
         }
       }
     }
@@ -2363,7 +2360,7 @@ bool RouterThread::SendArtNet(ArtNet &artnet, const EosAddr &addr, Protocol prot
           if (universe->dmx[channel] != srcDMX[channel])
           {
             universe->dmx[channel] = srcDMX[channel];
-            dirty = true;
+            universe->dirty = true;
           }
         }
       }
@@ -2387,17 +2384,11 @@ bool RouterThread::SendArtNet(ArtNet &artnet, const EosAddr &addr, Protocol prot
             if (universe->dmx[channel] != srcDMX[channel])
             {
               universe->dmx[channel] = srcDMX[channel];
-              dirty = true;
+              universe->dirty = true;
             }
           }
         }
       }
-    }
-
-    if (dirty)
-    {
-      if (artnet_raw_send_dmx(artnet.server, universeNumber, static_cast<int16_t>(universe->dmx.size()), universe->dmx.data()) == ARTNET_EOK)
-        sent = true;
     }
   }
 
@@ -2895,6 +2886,9 @@ void RouterThread::run()
         sacn.sendTimer.start();
     }
 
+    // ArtNet output
+    FlushArtNet(artnet);
+
     UpdateLog();
 
     msleep(1);
@@ -2956,6 +2950,25 @@ void RouterThread::run()
 
   m_PrivateLog.AddInfo("router thread ended");
   UpdateLog();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+void RouterThread::FlushArtNet(ArtNet &artnet)
+{
+  for (ARTNET_SEND_UNIVERSE_LIST::iterator outputIter = artnet.output.begin(); outputIter != artnet.output.end(); ++outputIter)
+  {
+    uint8_t universeNumber = outputIter->first;
+    ArtNetSendUniverse &universe = outputIter->second;
+
+    qint64 timeout = universe.dirty ? 22 : 1000;
+    if (universe.timer.isValid() && universe.timer.elapsed() < timeout)
+      continue;
+
+    artnet_raw_send_dmx(artnet.server, universeNumber, static_cast<int16_t>(universe.dmx.size()), universe.dmx.data());
+    universe.timer.start();
+    universe.dirty = false;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -372,6 +372,8 @@ public:
   struct ArtNetSendUniverse
   {
     std::array<uint8_t, ARTNET_DMX_LENGTH> dmx;
+    bool dirty = true;
+    QElapsedTimer timer;
   };
 
   typedef std::unordered_map<uint8_t, ArtNetSendUniverse> ARTNET_SEND_UNIVERSE_LIST;
@@ -532,6 +534,7 @@ protected:
   virtual bool MakePSNPacket(EosPacket &osc, EosPacket &psn);
   virtual bool SendsACN(sACN &sacn, ArtNet &artnet, const EosAddr &addr, Protocol protocol, const EosRouteDst &dst, EosPacket &osc);
   virtual bool SendArtNet(ArtNet &artnet, const EosAddr &addr, Protocol protocol, const EosRouteDst &dst, EosPacket &osc);
+  virtual void FlushArtNet(ArtNet &artnet);
   virtual void ProcessTcpConnectionQ(TCP_CLIENT_THREADS &tcpClientThreads, OSCStream::EnumFrameMode frameMode, EosTcpServerThread::CONNECTION_Q &tcpConnectionQ, bool mute);
   virtual bool ApplyTransform(OSCArgument &arg, const EosRouteDst &dst, OSCPacketWriter &packet);
   virtual void MakeSendPath(ArtNet &artnet, const EosAddr &addr, Protocol protocol, const QString &srcPath, const QString &dstPath, const OSCArgument *args, size_t argsCount, QString &sendPath);
