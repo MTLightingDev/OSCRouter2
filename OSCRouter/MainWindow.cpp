@@ -1037,6 +1037,168 @@ bool TcpWidget::HasConnection(const Router::CONNECTIONS& connections, const EosA
 
 ////////////////////////////////////////////////////////////////////////////////
 
+SettingsWidget::SettingsWidget(QWidget* parent /*= nullptr*/)
+  : QWidget(parent)
+{
+  setAutoFillBackground(true);
+
+  QGridLayout* grid = new QGridLayout(this);
+  grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+  int row = 0;
+
+  grid->addWidget(new QLabel(tr("sACN Interface"), this), row, 0);
+  m_sACNInterface = new QComboBox(this);
+  connect(m_sACNInterface, &QComboBox::currentIndexChanged, this, &SettingsWidget::onCurrentIndexChanged);
+  grid->addWidget(m_sACNInterface, row, 1);
+  ++row;
+
+  grid->addWidget(new QLabel(tr("Artnet Interface"), this), row, 0);
+  m_ArtNetInterface = new QComboBox(this);
+  connect(m_ArtNetInterface, &QComboBox::currentIndexChanged, this, &SettingsWidget::onCurrentIndexChanged);
+  grid->addWidget(m_ArtNetInterface, row, 1);
+
+  Clear();
+}
+
+void SettingsWidget::Clear()
+{
+  PopulateInterfaces(m_sACNInterface, tr("Default (All Interfaces)"));
+  PopulateInterfaces(m_ArtNetInterface, tr("Default (First Interface)"));
+}
+
+void SettingsWidget::Load(const QStringList& lines)
+{
+  Router::Settings settings;
+  for (QStringList::const_iterator i = lines.begin(); i != lines.end(); i++)
+    LoadLine(*i, settings);
+
+  // populate UI
+  LoadSettings(settings);
+
+  // save settings from UI and perform error checking
+  SaveSettings(settings);
+
+  // load saved settings (that have been error checked)
+  LoadSettings(settings);
+}
+
+void SettingsWidget::LoadLine(const QString& line, Router::Settings& settings)
+{
+  QStringList items;
+  FileUtils::GetItemsFromQuotedString(line, items);
+
+  if (items.size() == 3 && items[0].compare(QLatin1String("Settings"), Qt::CaseInsensitive) == 0)
+  {
+    settings.sACNIP = items[1];
+    settings.artNetIP = items[2];
+  }
+}
+
+void SettingsWidget::LoadSettings(const Router::Settings& settings)
+{
+  Clear();
+  SetInterface(m_sACNInterface, settings.sACNIP);
+  SetInterface(m_ArtNetInterface, settings.artNetIP);
+}
+
+void SettingsWidget::Save(QTextStream& stream)
+{
+  Router::Settings settings;
+  SaveSettings(settings);
+
+  stream << QStringLiteral("Settings,%1,%2\n").arg(FileUtils::QuotedString(settings.sACNIP)).arg(FileUtils::QuotedString(settings.artNetIP));
+}
+
+void SettingsWidget::SaveSettings(Router::Settings& settings)
+{
+  settings.sACNIP = GetInterface(m_sACNInterface);
+  settings.artNetIP = GetInterface(m_ArtNetInterface);
+}
+
+void SettingsWidget::PopulateInterfaces(QComboBox* combo, const QString& defaultText)
+{
+  combo->clear();
+
+  combo->addItem(defaultText, QString());
+
+  std::unordered_set<quint32> ips;
+
+  QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+  for (QList<QNetworkInterface>::const_iterator ifaceIter = ifaces.begin(); ifaceIter != ifaces.end(); ++ifaceIter)
+  {
+    const QNetworkInterface& iface = *ifaceIter;
+    if (!iface.flags().testFlag(QNetworkInterface::IsRunning))
+      continue;
+
+    QList<QNetworkAddressEntry> addrs = iface.addressEntries();
+    for (QList<QNetworkAddressEntry>::const_iterator addrIter = addrs.begin(); addrIter != addrs.end(); ++addrIter)
+    {
+      QHostAddress addr = addrIter->ip();
+      if (addr.protocol() != QAbstractSocket::IPv4Protocol)
+        continue;
+
+      quint32 ip = addr.toIPv4Address();
+      if (ips.find(ip) != ips.end())
+        continue;  // already added
+
+      QString ipStr = addr.toString();
+      combo->addItem(QStringLiteral("%1 (%2)").arg(ipStr).arg(iface.humanReadableName()), ipStr);
+    }
+  }
+}
+
+QString SettingsWidget::GetInterface(QComboBox* combo)
+{
+  return combo->currentData().toString();
+}
+
+void SettingsWidget::SetInterface(QComboBox* combo, const QString& ip)
+{
+  if (ip.isEmpty())
+  {
+    combo->setCurrentIndex(0);
+    return;
+  }
+
+  int index = combo->findData(ip, Qt::UserRole, Qt::MatchFixedString);
+  if (index >= 0)
+  {
+    combo->setCurrentIndex(index);
+    return;
+  }
+
+  QHostAddress addr(ip);
+  if (addr.protocol() == QAbstractSocket::IPv4Protocol && addr.toIPv4Address() != 0)
+  {
+    QString addrIP = addr.toString();
+    combo->addItem(QStringLiteral("%1 (%2)").arg(addrIP).arg(tr("Not Found")), addrIP);
+    index = combo->count() - 1;
+    combo->setItemData(index, ERROR_COLOR, Qt::ForegroundRole);
+    combo->setCurrentIndex(index);
+  }
+}
+
+void SettingsWidget::onCurrentIndexChanged(int index)
+{
+  QComboBox* combo = qobject_cast<QComboBox*>(sender());
+  if (!combo)
+    return;
+
+  QPalette pal = combo->palette();
+  pal.setColor(QPalette::ButtonText, palette().color(QPalette::ButtonText));
+
+  if (index >= 0)
+  {
+    QVariant v = combo->itemData(index, Qt::ForegroundRole);
+    if (!v.isNull())
+      pal.setColor(QPalette::ButtonText, v.value<QBrush>().color());
+  }
+
+  combo->setPalette(pal);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 ProtocolComboBox::ProtocolComboBox(size_t row, Protocol protocol, QWidget* parent /*= nullptr*/)
   : QComboBox(parent)
   , m_Row(row)
@@ -1471,6 +1633,8 @@ void RoutingWidget::LoadLine(const QString& line, Router::ROUTES& routes, ItemSt
 {
   QStringList items;
   FileUtils::GetItemsFromQuotedString(line, items);
+  if (items.isEmpty())
+    return;
 
   if (items.size() > 10)
   {
@@ -1512,10 +1676,10 @@ void RoutingWidget::LoadLine(const QString& line, Router::ROUTES& routes, ItemSt
 
     routes.push_back(route);
   }
-  else if (items.size() == 2)
+  else if (items.size() == 3 && items[0].compare(QLatin1String("Mute"), Qt::CaseInsensitive) == 0)
   {
-    itemStateTable.SetMuteAllIncoming(items[0].toInt() == 0);
-    itemStateTable.SetMuteAllOutgoing(items[1].toInt() == 0);
+    itemStateTable.SetMuteAllIncoming(items[0].toInt() != 0);
+    itemStateTable.SetMuteAllOutgoing(items[1].toInt() != 0);
   }
 }
 
@@ -1525,7 +1689,7 @@ void RoutingWidget::Save(QTextStream& stream)
   ItemStateTable itemStateTable;
   SaveRoutes(routes, itemStateTable);
 
-  stream << QStringLiteral("%1,%2\n").arg(itemStateTable.GetMuteAllIncoming() ? 0 : 1).arg(itemStateTable.GetMuteAllOutgoing() ? 0 : 1);
+  stream << QStringLiteral("Mute,%1,%2\n").arg(itemStateTable.GetMuteAllIncoming() ? 1 : 0).arg(itemStateTable.GetMuteAllOutgoing() ? 1 : 0);
 
   for (Router::ROUTES::const_iterator i = routes.begin(); i != routes.end(); i++)
   {
@@ -2355,6 +2519,9 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
   m_TcpWidget = new TcpWidget(tabs);
   tabs->addTab(m_TcpWidget, tr("TCP"));
 
+  m_SettingsWidget = new SettingsWidget(tabs);
+  tabs->addTab(m_SettingsWidget, tr("Settings"));
+
   QPushButton* button = new QPushButton(tr("Apply"), routingBase);
   connect(button, &QPushButton::clicked, this, &MainWindow::onApplyClicked);
   routingLayout->addWidget(button, 0, Qt::AlignRight);
@@ -2374,6 +2541,7 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
 
   m_RoutingWidget->LoadRoutes(Router::ROUTES(), ItemStateTable());
   m_TcpWidget->LoadConnections(Router::CONNECTIONS());
+  m_SettingsWidget->LoadSettings(Router::Settings());
 
   RestoreLastFile();
   UpdateWindowTitle();
@@ -2480,6 +2648,9 @@ bool MainWindow::BuildRoutes()
   Router::CONNECTIONS connections;
   m_TcpWidget->SaveConnections(connections, &m_ItemStateTable);
 
+  Router::Settings settings;
+  m_SettingsWidget->SaveSettings(settings);
+
   if (!routes.empty())
   {
     if (m_pPlatform && m_DisableSystemIdle)
@@ -2496,7 +2667,7 @@ bool MainWindow::BuildRoutes()
       }
     }
 
-    m_RouterThread = new RouterThread(routes, connections, m_ItemStateTable, m_ReconnectDelay);
+    m_RouterThread = new RouterThread(routes, connections, settings, m_ItemStateTable, m_ReconnectDelay);
     m_RouterThread->start();
     return true;
   }
@@ -2580,6 +2751,7 @@ bool MainWindow::Load(const QString& path)
 
   m_RoutingWidget->Load(lines);
   m_TcpWidget->Load(lines);
+  m_SettingsWidget->Load(lines);
 
   return true;
 }
@@ -2613,6 +2785,7 @@ bool MainWindow::Save(const QString& path)
 
   m_RoutingWidget->Save(stream);
   m_TcpWidget->Save(stream);
+  m_SettingsWidget->Save(stream);
 
   return true;
 }
@@ -2676,6 +2849,7 @@ void MainWindow::onNewFile()
 
   m_RoutingWidget->LoadRoutes(Router::ROUTES(), ItemStateTable());
   m_TcpWidget->LoadConnections(Router::CONNECTIONS());
+  m_SettingsWidget->LoadSettings(Router::Settings());
   m_FilePath.clear();
   m_Settings.setValue(SETTING_LAST_FILE, m_FilePath);
   QString path;
@@ -2790,6 +2964,10 @@ void MainWindow::onApplyClicked(bool /*checked*/)
   Router::CONNECTIONS connections;
   m_TcpWidget->SaveConnections(connections, /*itemStateTable*/ 0);
   m_TcpWidget->LoadConnections(connections);
+
+  Router::Settings settings;
+  m_SettingsWidget->SaveSettings(settings);
+  m_SettingsWidget->LoadSettings(settings);
 
   if (!m_Unsaved)
   {

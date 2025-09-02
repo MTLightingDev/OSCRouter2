@@ -141,6 +141,12 @@ public:
     ItemStateTable::ID dstItemStateTableId = ItemStateTable::sm_Invalid_Id;
   };
 
+  struct Settings
+  {
+    QString sACNIP;
+    QString artNetIP;
+  };
+
   typedef std::vector<sRoute> ROUTES;
 
   static uint16_t GetDefaultPSNPort();
@@ -391,7 +397,7 @@ public:
     ARTNET_DIRTY_LIST dirty;
   };
 
-  RouterThread(const Router::ROUTES &routes, const Router::CONNECTIONS &tcpConnections, const ItemStateTable &itemStateTable, unsigned int reconnectDelayMS);
+  RouterThread(const Router::ROUTES &routes, const Router::CONNECTIONS &tcpConnections, const Router::Settings &settings, const ItemStateTable &itemStateTable, unsigned int reconnectDelayMS);
   virtual ~RouterThread();
 
   virtual void Stop();
@@ -496,6 +502,10 @@ protected:
     SEND_UNIVERSE_LIST output;
     QElapsedTimer recvTimer;
     QElapsedTimer sendTimer;
+    std::vector<netintid> ifaces;
+
+    netintid *GetNetIFList() { return ifaces.empty() ? nullptr : ifaces.data(); }
+    int GetNetIFListSize() { return static_cast<int>(ifaces.size()); }
   };
 
   struct MuteAll
@@ -508,6 +518,7 @@ protected:
   unsigned int m_ReconnectDelay;
   Router::ROUTES m_Routes;
   Router::CONNECTIONS m_TcpConnections;
+  Router::Settings m_Settings;
   EosLog m_Log;
   EosLog m_PrivateLog;
   ItemStateTable m_ItemStateTable;

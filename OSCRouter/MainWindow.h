@@ -333,6 +333,35 @@ private:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+class SettingsWidget : public QWidget
+{
+  Q_OBJECT
+
+public:
+  SettingsWidget(QWidget* parent = nullptr);
+
+  void Clear();
+  void Load(const QStringList& lines);
+  void LoadSettings(const Router::Settings& settings);
+  void Save(QTextStream& stream);
+  void SaveSettings(Router::Settings& settings);
+
+private slots:
+  void onCurrentIndexChanged(int index);
+
+private:
+  QComboBox* m_sACNInterface = nullptr;
+  QComboBox* m_ArtNetInterface = nullptr;
+
+  void LoadLine(const QString& line, Router::Settings& settings);
+
+  static void PopulateInterfaces(QComboBox* combo, const QString& defaultText);
+  static QString GetInterface(QComboBox* combo);
+  static void SetInterface(QComboBox* combo, const QString& ip);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
 class ProtocolComboBox : public QComboBox
 {
   Q_OBJECT
@@ -541,6 +570,7 @@ private:
   QTextStream m_LogStream;
   RoutingWidget* m_RoutingWidget;
   TcpWidget* m_TcpWidget;
+  SettingsWidget* m_SettingsWidget;
   RouterThread* m_RouterThread;
   QString m_FilePath;
   bool m_Unsaved;

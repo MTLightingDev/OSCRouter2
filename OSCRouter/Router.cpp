@@ -1045,9 +1045,11 @@ void OSCBundleMethod::Flush(EosUdpInThread::RECV_Q &q)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-RouterThread::RouterThread(const Router::ROUTES &routes, const Router::CONNECTIONS &tcpConnections, const ItemStateTable &itemStateTable, unsigned int reconnectDelayMS)
+RouterThread::RouterThread(const Router::ROUTES &routes, const Router::CONNECTIONS &tcpConnections, const Router::Settings &settings, const ItemStateTable &itemStateTable,
+                           unsigned int reconnectDelayMS)
   : m_Routes(routes)
   , m_TcpConnections(tcpConnections)
+  , m_Settings(settings)
   , m_ItemStateTable(itemStateTable)
   , m_Run(true)
   , m_ReconnectDelay(reconnectDelayMS)
@@ -1301,6 +1303,7 @@ void RouterThread::DestroysACN(sACN &sacn)
     m_PrivateLog.AddInfo(QLatin1String("sACN networking destroyed").toUtf8().constData());
   }
 
+  sacn.ifaces.clear();
   sacn.output.clear();
 }
 
@@ -1346,6 +1349,26 @@ void RouterThread::BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &route
   if (sacn.net->Startup())
   {
     m_PrivateLog.AddInfo(QLatin1String("sACN networking started").toUtf8().constData());
+
+    if (!m_Settings.sACNIP.isEmpty())
+    {
+      quint32 ip = QHostAddress(m_Settings.sACNIP).toIPv4Address();
+      if (ip != 0)
+      {
+        std::vector<IAsyncSocketServ::netintinfo> ifaces;
+        ifaces.resize(sacn.net->GetNumInterfaces());
+        if (!ifaces.empty())
+        {
+          sacn.net->CopyInterfaceList(ifaces.data());
+          for (size_t i = 0; i < ifaces.size(); ++i)
+          {
+            const IAsyncSocketServ::netintinfo &iface = ifaces[i];
+            if (iface.addr.IsV4Address() && static_cast<quint32>(iface.addr.GetV4Address()) == ip)
+              sacn.ifaces.push_back(iface.id);
+          }
+        }
+      }
+    }
   }
   else
   {
@@ -1370,7 +1393,7 @@ void RouterThread::BuildsACN(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &route
           uint16_t universeNumber = universeIter->first;
           const ROUTES_BY_IP &routesByIp = universeIter->second;
 
-          if (sacn.client->ListenUniverse(universeNumber, nullptr, 0))
+          if (sacn.client->ListenUniverse(universeNumber, sacn.GetNetIFList(), sacn.GetNetIFListSize()))
           {
             SetItemState(routesByIp, ItemState::STATE_CONNECTED);
             m_PrivateLog.AddInfo(QStringLiteral("sACN client listening on universe %1").arg(universeNumber).toUtf8().constData());
@@ -1478,7 +1501,7 @@ void RouterThread::BuildArtNet(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &rou
       if (inputIter != artnet.inputs.end())
         continue;  // already listening on this universe
 
-      artnet_node client = artnet_new(nullptr, 0);
+      artnet_node client = artnet_new(m_Settings.artNetIP.isEmpty() ? nullptr : m_Settings.artNetIP.toLatin1(), 0);
       if (!client)
       {
         SetItemState(routesByIp, ItemState::STATE_NOT_CONNECTED);
@@ -1522,7 +1545,7 @@ void RouterThread::BuildArtNet(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &rou
 
   if (hasOutput)
   {
-    artnet.server = artnet_new(nullptr, 0);
+    artnet.server = artnet_new(m_Settings.artNetIP.isEmpty() ? nullptr : m_Settings.artNetIP.toLatin1(), 0);
     if (artnet.server)
     {
       m_PrivateLog.AddInfo(QLatin1String("ArtNet server created").toUtf8().constData());
@@ -2111,7 +2134,8 @@ bool RouterThread::SendsACN(sACN &sacn, ArtNet &artnet, const EosAddr &addr, Pro
       // create dmx
       uint1 *pslots = nullptr;
       uint handle = 0;
-      if (sacn.server->CreateUniverse(kCID, nullptr, 0, kName, static_cast<uint1>(priority), 0, 0, STARTCODE_DMX, universeNumber, static_cast<uint2>(UNIVERSE_SIZE), pslots, handle))
+      if (sacn.server->CreateUniverse(kCID, sacn.GetNetIFList(), sacn.GetNetIFListSize(), kName, static_cast<uint1>(priority), 0, 0, STARTCODE_DMX, universeNumber, static_cast<uint2>(UNIVERSE_SIZE),
+                                      pslots, handle))
       {
         universe.priority = priority;
         universe.dmx.handle = handle;
@@ -2132,7 +2156,8 @@ bool RouterThread::SendsACN(sACN &sacn, ArtNet &artnet, const EosAddr &addr, Pro
           // create perChannelPriority
           uint1 *pslots = nullptr;
           uint handle = 0;
-          if (sacn.server->CreateUniverse(kCID, nullptr, 0, kName, static_cast<uint1>(priority), 0, 0, STARTCODE_PRIORITY, universeNumber, static_cast<uint2>(UNIVERSE_SIZE), pslots, handle))
+          if (sacn.server->CreateUniverse(kCID, sacn.GetNetIFList(), sacn.GetNetIFListSize(), kName, static_cast<uint1>(priority), 0, 0, STARTCODE_PRIORITY, universeNumber,
+                                          static_cast<uint2>(UNIVERSE_SIZE), pslots, handle))
           {
             universe.channelPriority.handle = handle;
             universe.channelPriority.channels = pslots;
