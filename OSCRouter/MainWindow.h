@@ -230,7 +230,8 @@ class RoutingCol : public QWidget
 public:
   enum class Constants
   {
-    kSpacing = 4
+    kSpacing = 4,
+    kLastRowGap = 16
   };
 
   typedef std::vector<QWidget*> Widgets;

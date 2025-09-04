@@ -393,7 +393,7 @@ RoutingCheckBox::RoutingCheckBox(Style checkBoxStyle, size_t id, QWidget* parent
 void RoutingCheckBox::Construct()
 {
   setCheckable(true);
-  setFixedSize(24, 24);
+  setFixedSize(16, 16);
   connect(this, &QAbstractButton::toggled, this, &RoutingCheckBox::onToggled);
 }
 
@@ -435,24 +435,21 @@ void RoutingCheckBox::paintEvent(QPaintEvent* /*event*/)
 {
   QPainter painter(this);
 
-  if (isEnabled())
-  {
-    if (underMouse())
-      painter.fillRect(rect(), palette().color(QPalette::Window).lighter());
-  }
-  else
-    painter.setOpacity(0.25);
-
   const QIcon& icon = GetIcon(isChecked());
 
   QPixmap& pixmap = (isChecked() ? m_Checked : m_Unchecked);
 
-  int s = qMin(width(), height());
+  qreal dpr = devicePixelRatioF();
+  if (dpr < 0 || qFuzzyIsNull(dpr))
+    dpr = 1;
+
+  int s = qRound(qMin(width(), height()) * dpr);
   QSize ps(s, s);
 
   if (pixmap.isNull() || pixmap.size() != ps)
   {
     pixmap = icon.pixmap(ps);
+    pixmap.setDevicePixelRatio(dpr);
     if (pixmap.size() != ps)
       pixmap = pixmap.scaled(ps, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
   }
@@ -464,7 +461,17 @@ void RoutingCheckBox::paintEvent(QPaintEvent* /*event*/)
   if (pixmap.devicePixelRatio() > 0 && !qFuzzyIsNull(pixmap.devicePixelRatio()))
     ps = QSize(qRound(ps.width() / pixmap.devicePixelRatio()), qRound(ps.height() / pixmap.devicePixelRatio()));
 
-  painter.drawPixmap(qRound((width() - ps.width()) / 2.0), qRound((height() - ps.width()) / 2.0), pixmap);
+  QPoint pos(qRound((width() - ps.width()) / 2.0), qRound((height() - ps.width()) / 2.0));
+
+  if (isEnabled())
+  {
+    if (underMouse())
+      painter.fillRect(QRect(pos, ps), palette().color(QPalette::Window).lighter());
+  }
+  else
+    painter.setOpacity(0.25);
+
+  painter.drawPixmap(pos, pixmap);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -573,6 +580,9 @@ QSize RoutingCol::sizeHint() const
     }
   }
 
+  if (m_Rows.size() > 1)
+    sh.rheight() += static_cast<int>(Constants::kLastRowGap);
+
   sh = sh.boundedTo(maximumSize());
 
   return sh;
@@ -594,6 +604,9 @@ QSize RoutingCol::minimumSizeHint() const
       }
     }
   }
+
+  if (m_Rows.size() > 1)
+    sh.rheight() += static_cast<int>(Constants::kLastRowGap);
 
   sh = sh.boundedTo(maximumSize());
 
@@ -621,20 +634,26 @@ void RoutingCol::resizeEvent(QResizeEvent* /*event*/)
 
 int RoutingCol::UpdateLayout()
 {
-  int y = static_cast<int>(Constants::kSpacing);
+  int y = 0;
 
+  size_t lastRow = m_Rows.size() - 1;
   for (size_t row = 0; row < m_Rows.size(); ++row)
   {
     Widgets& widgets = m_Rows[row].widgets;
 
     int rowHeight = m_Rows[row].height;
+
+    // gap before final [+] row
+    if (row == lastRow && m_Rows.size() > 1)
+      y += static_cast<int>(Constants::kLastRowGap);
+
     for (size_t w = 0; w < widgets.size(); ++w)
     {
-      int h = widgets[w]->height();
-      widgets[w]->setGeometry(0, y, width(), h);
+      widgets[w]->resize(width(), widgets[w]->height());
+      widgets[w]->move(qRound((width() - widgets[w]->width()) / 2.0), y);
     }
 
-    y += rowHeight;
+    y += rowHeight + static_cast<int>(Constants::kSpacing);
   }
 
   return y;
@@ -673,6 +692,7 @@ TcpWidget::TcpWidget(QWidget* parent /*= nullptr*/)
   }
 
   connect(m_Cols, &QSplitter::splitterMoved, this, &TcpWidget::updateHeaders);
+  connect(m_Scroll->horizontalScrollBar(), &QScrollBar::valueChanged, this, &TcpWidget::updateHeaders);
 
   Clear();
   UpdateLayout();
@@ -777,7 +797,7 @@ void TcpWidget::AddRow(size_t id, bool remove, const Router::sConnection& connec
   AddCol(col++, row.port);
 
   row.addRemove = new RoutingButton(remove ? QLatin1String("-") : QLatin1String("+"), id, m_Cols->widget(col));
-  row.addRemove->setToolTip(tr("Add/Remove this route"));
+  row.addRemove->setToolTip(remove ? tr("Remove this route") : tr("Add this route"));
   connect(row.addRemove, &RoutingButton::clickedWithId, this, &TcpWidget::onAddRemoveClicked);
   AddCol(col++, row.addRemove, row.addRemove->sizeHint().height());
 
@@ -1344,6 +1364,7 @@ RoutingWidget::RoutingWidget(QWidget* parent /*= nullptr*/)
   }
 
   connect(m_Cols, &QSplitter::splitterMoved, this, &RoutingWidget::updateHeaders);
+  connect(m_Scroll->horizontalScrollBar(), &QScrollBar::valueChanged, this, &RoutingWidget::updateHeaders);
 
   Clear();
   UpdateLayout();
@@ -1570,7 +1591,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
   AddCol(col++, row.outMax);
 
   row.addRemove = new RoutingButton(remove ? QLatin1String("-") : QLatin1String("+"), id, m_Cols->widget(col));
-  row.addRemove->setToolTip(tr("Add/Remove this route"));
+  row.addRemove->setToolTip(remove ? tr("Remove this route") : tr("Add this route"));
   connect(row.addRemove, &RoutingButton::clickedWithId, this, &RoutingWidget::onAddRemoveClicked);
   AddCol(col++, row.addRemove, /*fixed*/ true, /*fixedHeight*/ true);
 
@@ -1846,9 +1867,10 @@ void RoutingWidget::paintEvent(QPaintEvent* /*event*/)
   QPainter painter(this);
   painter.fillRect(rect(), BG_COLOR);
 
-  int y = m_Incoming.base->sizeHint().height() + static_cast<int>(RoutingCol::Constants::kSpacing) / 2;
+  int half = static_cast<int>(RoutingCol::Constants::kSpacing) / 2;
+  int y = m_Incoming.base->sizeHint().height() + half;
   int h = height() - y;
-  int x1 = RectForCol(Col::kInState).left() - static_cast<int>(RoutingCol::Constants::kSpacing);
+  int x1 = RectForCol(Col::kInState).left() - half;
   int x2 = RectForCol(Col::kInMax).right() + static_cast<int>(RoutingCol::Constants::kSpacing);
   painter.fillRect(QRect(x1, y, x2 - x1, h), QColor(45, 45, 45));
 
@@ -1943,6 +1965,7 @@ void SetMuted(QWidget* w, bool b)
 
 void RoutingWidget::UpdateEnableState()
 {
+  size_t lastRow = m_Rows.size() - 1;
   for (size_t i = 0; i < m_Rows.size(); ++i)
   {
     Row& row = m_Rows[i];
@@ -1950,7 +1973,7 @@ void RoutingWidget::UpdateEnableState()
     bool e = row.enable->isChecked();
     Protocol protocol = row.inProtocol->GetProtocol();
 
-    row.mute->setEnabled(e);
+    row.mute->setEnabled(e && i != lastRow);
     row.label->setEnabled(e);
     row.inIP->setEnabled(e);
     row.inPort->setEnabled(e);
@@ -1977,7 +2000,11 @@ void RoutingWidget::UpdateMuteState()
   bool muteAllIncoming = m_Incoming.mute->isChecked();
   bool muteAllOutgoing = m_Outgoing.mute->isChecked();
 
-  for (size_t i = 0; i < m_Rows.size(); ++i)
+  if (m_Rows.empty())
+    return;
+
+  size_t lastRow = m_Rows.size() - 1;
+  for (size_t i = 0; i < lastRow; ++i)
   {
     Row& row = m_Rows[i];
 
@@ -2785,9 +2812,9 @@ bool MainWindow::Save(const QString& path)
   if (!file.open(QFile::WriteOnly | QFile::Truncate | QFile::Text))
     return false;
 
+  m_SettingsWidget->Save(stream);
   m_RoutingWidget->Save(stream);
   m_TcpWidget->Save(stream);
-  m_SettingsWidget->Save(stream);
 
   return true;
 }
