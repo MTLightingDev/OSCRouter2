@@ -25,7 +25,7 @@
 #include "Version.h"
 #include "artnet/packets.h"
 #include "streamcommon.h"
-#include <psn_lib.hpp>
+#include "psn_lib.hpp"
 
 #ifndef WIN32
 #include <sys/types.h>
@@ -1467,7 +1467,7 @@ int ArtNetRecv(artnet_node n, void *pp, void *d)
   if (!artnet)
     return 0;
 
-  artnet->inputIPs[n] = static_cast<unsigned int>(htonl(p->from.S_un.S_addr));
+  artnet->inputIPs[n] = static_cast<unsigned int>(htonl(p->from.s_addr));
   return 0;
 }
 

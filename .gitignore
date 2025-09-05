@@ -50,8 +50,10 @@ Temporary Items
 # XCode
 xcuserdata
 project.xcworkspace
+*.xcscheme
 
 # Build folders
 moc_*.cpp
+qt.qrc.cpp
 OSCRouter/x64
 build

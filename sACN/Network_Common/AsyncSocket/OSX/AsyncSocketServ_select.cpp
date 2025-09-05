@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <netinet/in.h>
+#include <unistd.h>
 #include <pthread.h>
 
 #include "deftypes.h"
@@ -27,8 +28,6 @@
 #include "SockUtil.h"
 #include "IfaceSupport.h"
 #include "AsyncSocketServ_select.h"
-
-#include <CoreServices/CoreServices.h>
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 // Local constants
@@ -228,13 +227,14 @@ bool CAsyncSocketServ::Startup()
 	//We need to detect whether or not we are working on Lion or better.
 	//Adapted from http://www.cocoadev.com/index.pl?DeterminingOSVersion
 	//If we don't get version numbers, we'll assume the old OS
-	long int major = 0;
-	long int minor = 0;
-	Gestalt(gestaltSystemVersionMajor, &major);
-	Gestalt(gestaltSystemVersionMinor, &minor);
-	
-	lion_or_better = ((major > 10) || 
-					  ((major == 10) && (minor >= 7)));
+//	long int major = 0;
+//	long int minor = 0;
+//	Gestalt(gestaltSystemVersionMajor, &major);
+//	Gestalt(gestaltSystemVersionMinor, &minor);
+//	
+//	lion_or_better = ((major > 10) || 
+//					  ((major == 10) && (minor >= 7)));
+  lion_or_better = true;
 	
 	return true;
 }

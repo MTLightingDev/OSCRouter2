@@ -67,6 +67,7 @@
 #endif
 
 #ifdef WIN32
+
 #include <WinSock2.h>
 
 #ifndef _WIN_ASYNCSOCKETINTERFACE_H_
@@ -84,6 +85,25 @@
 #define IPlatformAsyncSocketServ IWinAsyncSocketServ
 #define IPlatformStreamACNCli IWinStreamACNCli
 #define IPlatformStreamACNSrv IWinStreamACNSrv
+
+#else
+
+#ifndef _OSX_ASYNCSOCKETINTERFACE_H_
+#include "OSX_AsyncSocketInterface.h"
+#endif
+
+#ifndef _OSX_STREAMACNCLIINTERFACE_H_
+#include "OSX_StreamACNCliInterface.h"
+#endif
+
+#ifndef _OSX_STREAMACNSRVINTERFACE_H_
+#include "OSX_StreamACNSrvInterface.h"
+#endif
+
+#define IPlatformAsyncSocketServ IOSXAsyncSocketServ
+#define IPlatformStreamACNCli IOSXStreamACNCli
+#define IPlatformStreamACNSrv IOSXStreamACNSrv
+
 #endif
 
 #include "artnet/artnet.h"
