@@ -2505,7 +2505,7 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
                     "QTabBar::tab:selected {background: #282828;}"
                     "QMenuBar {background: transparent;}"
                     "QScrollArea {background: transparent;}"
-                    "QSplitter::handle {image: url(\"\");}"
+                    "QSplitter::handle {image: none;}"
                     "QSplitter::handle:hover {background: #08ffffff;}"
                     "QSplitter {background: transparent;}"));
 
