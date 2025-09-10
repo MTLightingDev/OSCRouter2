@@ -127,7 +127,7 @@ public:
 
   QJSEngine &js() { return m_JS; }
   QString evaluate(const QString &script, const QString &path = QString(), const OSCArgument *args = nullptr, size_t argsCount = 0, const uint8_t *universe = nullptr, size_t universeCount = 0,
-                   EosPacket *packet = nullptr);
+                   EosPacket *packet = nullptr, EosLog *log = nullptr);
 
 private:
   QJSEngine m_JS;

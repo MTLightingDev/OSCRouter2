@@ -1837,7 +1837,7 @@ bool RouterThread::MakeOSCPacket(ArtNet &artnet, const EosAddr &addr, Protocol p
         }
       }
 
-      error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, /*args*/ nullptr, /*argsCount*/ 0, dmx.data(), dmx.size(), &packet);
+      error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, /*args*/ nullptr, /*argsCount*/ 0, dmx.data(), dmx.size(), &packet, &m_PrivateLog);
     }
     else if (protocol == Protocol::kArtNet)
     {
@@ -1857,10 +1857,10 @@ bool RouterThread::MakeOSCPacket(ArtNet &artnet, const EosAddr &addr, Protocol p
         }
       }
 
-      error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, args, argsCount, universe, universeCount, &packet);
+      error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, args, argsCount, universe, universeCount, &packet, &m_PrivateLog);
     }
     else
-      error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, args, argsCount, /*universe*/ nullptr, /*universeCount*/ 0, &packet);
+      error = m_ScriptEngine->evaluate(dst.scriptText, srcPath, args, argsCount, /*universe*/ nullptr, /*universeCount*/ 0, &packet, &m_PrivateLog);
 
     if (error.isEmpty())
       return true;
@@ -3376,7 +3376,7 @@ void RouterThread::UniverseData(const CID &source, const char *source_name, cons
 ////////////////////////////////////////////////////////////////////////////////
 
 QString ScriptEngine::evaluate(const QString &script, const QString &path /*= QString()*/, const OSCArgument *args /*= nullptr*/, size_t argsCount /*= 0*/, const uint8_t *universe /*= nullptr*/,
-                               size_t universeCount /*= 0*/, EosPacket *packet /*= nullptr*/)
+                               size_t universeCount /*= 0*/, EosPacket *packet /*= nullptr*/, EosLog *log /*= nullptr*/)
 {
   // set globals
   m_JS.globalObject().setProperty(QLatin1String("OSC"), path);
@@ -3442,6 +3442,7 @@ QString ScriptEngine::evaluate(const QString &script, const QString &path /*= QS
     jsarray = m_JS.newArray(0);
 
   m_JS.globalObject().setProperty(QLatin1String("ARGS"), jsarray);
+  m_JS.globalObject().setProperty(QLatin1String("LOGS"), m_JS.newArray(0));
 
   // evaluate
   QStringList stack_trace;
@@ -3461,17 +3462,29 @@ QString ScriptEngine::evaluate(const QString &script, const QString &path /*= QS
     return error;
   }
 
+  if (log)
+  {
+    jsarray = m_JS.globalObject().property(QLatin1String("LOGS"));
+    quint32 count = jsarray.property(QLatin1String("length")).toUInt();
+    for (quint32 i = 0; i < count; ++i)
+    {
+      QString msg = jsarray.property(i).toString();
+      if (!msg.isEmpty())
+        log->AddInfo(msg.toUtf8().constData());
+    }
+  }
+
   if (!packet)
     return QString();  // done with evaluation, no packet needed
 
   QString sendPath = m_JS.globalObject().property(QLatin1String("OSC")).toString();
   if (sendPath.isEmpty())
-    sendPath = path;
+    return QString();  // done with evaluation, no packet needed
 
   OSCPacketWriter osc(sendPath.toUtf8().constData());
 
   jsarray = m_JS.globalObject().property(QLatin1String("ARGS"));
-  quint32 count = static_cast<quint32>(qMax(quint32(0), jsarray.property(QLatin1String("length")).toUInt()));
+  quint32 count = jsarray.property(QLatin1String("length")).toUInt();
   for (quint32 i = 0; i < count; ++i)
   {
     QJSValue arg = jsarray.property(i);

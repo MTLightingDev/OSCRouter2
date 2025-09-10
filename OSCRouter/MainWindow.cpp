@@ -312,7 +312,6 @@ ScriptEdit::ScriptEdit(QWidget* parent /*= nullptr*/)
   setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
   setWordWrapMode(QTextOption::NoWrap);
   setLineWrapMode(QTextEdit::NoWrap);
-  setMaximumHeight(70);
 
   m_Error = new QPushButton(tr("!"), this);
   int s = m_Error->sizeHint().height();
@@ -324,16 +323,7 @@ ScriptEdit::ScriptEdit(QWidget* parent /*= nullptr*/)
 
 QSize ScriptEdit::sizeHint() const
 {
-  static QSize kSizeHint;
-  if (kSizeHint.isEmpty())
-  {
-    LineEdit* temp = new LineEdit();
-    kSizeHint = temp->sizeHint();
-    kSizeHint.setHeight(kSizeHint.height() * 3);
-    temp->deleteLater();
-  }
-
-  return kSizeHint;
+  return document()->size().toSize() + QSize(20, 20);
 }
 
 void ScriptEdit::CheckForErrors()
@@ -2409,7 +2399,7 @@ QString RoutingWidget::GetHelpText(Col col, Protocol inProtocol, Protocol outPro
                "\n"
                "Ex: OSC to ArtNet\n"
                "Input:  /rgb/255/0/127\n"
-               "Path:   /sacn/offset/10=%2,%3,%4\n"
+               "Path:   /artnet/offset/10=%2,%3,%4\n"
                "Output: ArtNet output universe: 10=255, 11=0, 12=127");
       }
 
@@ -2448,13 +2438,28 @@ QString RoutingWidget::GetHelpText(Col col, Protocol inProtocol, Protocol outPro
                "--------------------\n"
                "OSC = outgoing osc path (string)\n"
                "ARGS = array of osc arguments\n"
+               "LOGS = array of log messages you may output\n"
                "\n"
                "Write your own JavaScript to modify the OSC and ARGS variables\n"
+               "Set OSC to an empty string to skip sending\n"
                "\n"
                "Ex:\n"
                "// modify outgoing osc fader from percent to 8-bit value:\n"
                "OSC = OSC + \"/level\";\n"
-               "ARGS[0] = Math.round(ARGS[0] * 255);");
+               "ARGS[0] = Math.round(ARGS[0] * 255);\n"
+               "\n"
+               "Incoming sACN & Artnet:\n"
+               "ARGS is an array of the incoming universe levels\n"
+               "\n"
+               "Ex:\n"
+               "// convert sACN or ArtNet universe level 100 to OSC:\n"
+               "OSC = \"/level\"\n"
+               "if (ARGS.length > 100) {\n"
+               "  ARGS[0] = ARGS[100];\n"
+               "  ARGS.length = 1;\n"
+               "} else {\n"
+               "  OSC = \"\";\n"
+               "}");
       }
 
       if (!all)
