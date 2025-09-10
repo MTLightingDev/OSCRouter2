@@ -466,6 +466,7 @@ protected:
   {
     uint8_t priority = 0;
     unsigned int ip = 0;
+    std::unordered_set<unsigned int> ips;
     bool hasPerChannelPriority = false;
     std::array<uint8_t, UNIVERSE_SIZE> dmx;
     std::array<uint8_t, UNIVERSE_SIZE> channelPriority;
@@ -481,7 +482,6 @@ protected:
 
   struct sACNSource
   {
-    unsigned int ip = 0;
     QString name;
     UNIVERSE_LIST universes;
   };

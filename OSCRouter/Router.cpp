@@ -3274,8 +3274,9 @@ void RouterThread::UniverseData(const CID &source, const char *source_name, cons
 {
   QMutexLocker locker(&m_sACNRecv.mutex);
 
+  unsigned int ip = source_ip.GetV4Address();
+
   sACNSource &recvSource = m_sACNRecv.sources[source];
-  recvSource.ip = source_ip.GetV4Address();
   if (source_name)
     recvSource.name = QString::fromUtf8(source_name);
 
@@ -3291,8 +3292,10 @@ void RouterThread::UniverseData(const CID &source, const char *source_name, cons
       char ipStr[CIPAddr::ADDRSTRINGBYTES];
       CIPAddr::AddrIntoString(source_ip, ipStr, /*showport*/ false, /*showint*/ false);
 
+      recvUniverse.ips.insert(ip);
+
       m_sACNRecv.log.AddInfo(
-          QStringLiteral("sACN universe %1 source appeared: %2 {%3} priority: %4, ip: %5").arg(universe).arg(recvSource.name).arg(cidStr).arg(priority).arg(ipStr).toUtf8().constData());
+          QStringLiteral("sACN universe %1 source appeared: %2 {%3}, priority: %4, ip: %5").arg(universe).arg(recvSource.name).arg(cidStr).arg(priority).arg(ipStr).toUtf8().constData());
     }
     else
     {
@@ -3310,26 +3313,21 @@ void RouterThread::UniverseData(const CID &source, const char *source_name, cons
                                    .constData());
       }
 
-      // if (recvUniverse.ip != recvSource.ip)
-      //{
-      //   char cidStr[CID::CIDSTRINGBYTES];
-      //   CID::CIDIntoString(source, cidStr);
+      if (recvUniverse.ips.insert(ip).second)
+      {
+        char cidStr[CID::CIDSTRINGBYTES];
+        CID::CIDIntoString(source, cidStr);
 
-      //  char ipStrOld[CIPAddr::ADDRSTRINGBYTES];
-      //  CIPAddr old_addr;
-      //  old_addr.SetV4Address(recvUniverse.ip);
-      //  CIPAddr::AddrIntoString(old_addr, ipStrOld, /*showport*/ false, /*showint*/ false);
+        char ipStr[CIPAddr::ADDRSTRINGBYTES];
+        CIPAddr::AddrIntoString(source_ip, ipStr, /*showport*/ false, /*showint*/ false);
 
-      //  char ipStrNew[CIPAddr::ADDRSTRINGBYTES];
-      //  CIPAddr::AddrIntoString(source_ip, ipStrNew, /*showport*/ false, /*showint*/ false);
-
-      //  m_sACNRecv.log.AddInfo(
-      //      QStringLiteral("sACN universe %1 source ip changed: %2 {%3}, ip: %4 -> %5").arg(universe).arg(recvSource.name).arg(cidStr).arg(ipStrOld).arg(ipStrNew).toUtf8().constData());
-      //}
+        m_sACNRecv.log.AddInfo(
+            QStringLiteral("sACN universe %1 source appeared: %2 {%3}, priority: %4, ip: %5").arg(universe).arg(recvSource.name).arg(cidStr).arg(priority).arg(ipStr).toUtf8().constData());
+      }
     }
 
     recvUniverse.priority = priority;
-    recvUniverse.ip = recvSource.ip;
+    recvUniverse.ip = ip;
     m_sACNRecv.dirtyUniverses.insert(universe);
 
     if (slot_count != 0 && pdata)
@@ -3345,6 +3343,8 @@ void RouterThread::UniverseData(const CID &source, const char *source_name, cons
       char ipStr[CIPAddr::ADDRSTRINGBYTES];
       CIPAddr::AddrIntoString(source_ip, ipStr, /*showport*/ false, /*showint*/ false);
 
+      recvUniverse.ips.insert(ip);
+
       m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority source appeared: %2 {%3}, ip: %4").arg(universe).arg(recvSource.name).arg(cidStr).arg(ipStr).toUtf8().constData());
     }
     else if (!recvUniverse.hasPerChannelPriority)
@@ -3353,25 +3353,19 @@ void RouterThread::UniverseData(const CID &source, const char *source_name, cons
       CID::CIDIntoString(source, str);
       m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 changed to per channel priority: %2 {%3}").arg(universe).arg(recvSource.name).arg(str).toUtf8().constData());
     }
-    else if (recvUniverse.ip != recvSource.ip)
+    else if (recvUniverse.ips.insert(ip).second)
     {
       char cidStr[CID::CIDSTRINGBYTES];
       CID::CIDIntoString(source, cidStr);
 
-      char ipStrOld[CIPAddr::ADDRSTRINGBYTES];
-      CIPAddr old_addr;
-      old_addr.SetV4Address(recvUniverse.ip);
-      CIPAddr::AddrIntoString(old_addr, ipStrOld, /*showport*/ false, /*showint*/ false);
+      char ipStr[CIPAddr::ADDRSTRINGBYTES];
+      CIPAddr::AddrIntoString(source_ip, ipStr, /*showport*/ false, /*showint*/ false);
 
-      char ipStrNew[CIPAddr::ADDRSTRINGBYTES];
-      CIPAddr::AddrIntoString(source_ip, ipStrNew, /*showport*/ false, /*showint*/ false);
-
-      m_sACNRecv.log.AddInfo(
-          QStringLiteral("sACN universe %1 per channel priority ip changed: %2 {%3}, ip: %4 -> %5").arg(universe).arg(recvSource.name).arg(cidStr).arg(ipStrOld).arg(ipStrNew).toUtf8().constData());
+      m_sACNRecv.log.AddInfo(QStringLiteral("sACN universe %1 per channel priority source appeared: %2 {%3}, ip: %4").arg(universe).arg(recvSource.name).arg(cidStr).arg(ipStr).toUtf8().constData());
     }
 
     recvUniverse.hasPerChannelPriority = true;
-    recvUniverse.ip = recvSource.ip;
+    recvUniverse.ip = ip;
     m_sACNRecv.dirtyUniverses.insert(universe);
 
     if (slot_count != 0 && pdata)
