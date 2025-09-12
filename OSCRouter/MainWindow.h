@@ -68,17 +68,12 @@ public:
   virtual void SetColor(const QColor& color);
   virtual void Activate(unsigned int timeoutMS);
   virtual void Deactivate();
-  QSize sizeHint() const override { return QSize(16, 16); }
+  QSize sizeHint() const override { return QSize(20, 20); }
 
 private slots:
   void onUpdate();
 
 protected:
-  enum EnumConstants
-  {
-    MARGIN = 2
-  };
-
   QColor m_Color;
   QImage m_IconOutline;
   QImage m_IconFill;

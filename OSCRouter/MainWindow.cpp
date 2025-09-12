@@ -213,7 +213,6 @@ void Indicator::UpdateIcon()
   if (m_Color.alpha() > 0)
   {
     QRect r(rect());
-    r.adjust(MARGIN, MARGIN, -MARGIN, -MARGIN);
     int size = qMin(r.width(), r.height());
 
     qreal dpr = devicePixelRatioF();
@@ -230,10 +229,13 @@ void Indicator::UpdateIcon()
       QPainter painter;
       if (painter.begin(&m_IconOutline))
       {
+        QRectF glowRect = m_IconOutline.rect();
+        QRectF solidRect = glowRect.adjusted(6, 6, -6, -6);
+
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(QPen(m_Color, 1.5));
         painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(QRect(1, 1, size - 2, size - 2));
+        painter.drawEllipse(solidRect);
         painter.end();
 
         m_IconOutline.setDevicePixelRatio(dpr);
@@ -244,8 +246,18 @@ void Indicator::UpdateIcon()
         {
           painter.setRenderHint(QPainter::Antialiasing);
           painter.setPen(Qt::NoPen);
+
+          QRadialGradient grad(glowRect.center(), glowRect.width() / 2.0);
+          QColor gradColor = m_Color;
+          gradColor.setAlpha(160);
+          grad.setColorAt(0, m_Color);
+          gradColor.setAlpha(0);
+          grad.setColorAt(1, gradColor);
+          painter.setBrush(grad);
+          painter.drawEllipse(glowRect);
+
           painter.setBrush(m_Color);
-          painter.drawEllipse(QRect(1, 1, size - 2, size - 2));
+          painter.drawEllipse(solidRect);
           painter.end();
 
           m_IconFill.setDevicePixelRatio(dpr);
@@ -758,8 +770,6 @@ void TcpWidget::AddRow(size_t id, bool remove, const Router::sConnection& connec
   row.state->setToolTip(tr("Status"));
   row.state->SetColor(MUTED_COLOR);
   row.state->Deactivate();
-  row.state->setMinimumSize(16, 16);
-  row.state->setMaximumWidth(16);
   AddCol(col++, row.state, row.state->sizeHint().height());
 
   row.activity = new Indicator(m_Cols->widget(col));
