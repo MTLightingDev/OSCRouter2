@@ -1472,7 +1472,7 @@ void RoutingWidget::AddRow(size_t id, bool remove, const QString& label, const R
   row.id = id;
 
   row.enable = new RoutingCheckBox(id, m_Cols->widget(col));
-  row.enable->setToolTip(tr("Enable this route - enforced when you click [Apply]"));
+  row.enable->setToolTip(tr("Enable this route - enforced when you click [Start]"));
   row.enable->setChecked(route.enable);
   connect(row.enable, &RoutingCheckBox::toggledWithId, this, &RoutingWidget::onEnableToggled);
   AddCol(col++, row.enable, /*fixed*/ true);
@@ -2593,9 +2593,28 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
   m_SettingsWidget = new SettingsWidget(tabs);
   tabs->addTab(m_SettingsWidget, tr("Settings"));
 
-  QPushButton* button = new QPushButton(tr("Apply"), routingBase);
-  connect(button, &QPushButton::clicked, this, &MainWindow::onApplyClicked);
-  routingLayout->addWidget(button, 0, Qt::AlignRight);
+  QHBoxLayout* buttonLayout = new QHBoxLayout();
+  buttonLayout->setAlignment(Qt::AlignRight);
+  routingLayout->addLayout(buttonLayout);
+
+  m_StartButton = new QPushButton(tr("Start"), routingBase);
+  QFont fnt = m_StartButton->font();
+  fnt.setPointSize(11);
+  m_StartButton->setFont(fnt);
+  QPalette pal = m_StartButton->palette();
+  pal.setColor(QPalette::Active, QPalette::Button, QColor(8, 91, 44));
+  pal.setColor(QPalette::Active, QPalette::ButtonText, Qt::white);
+  m_StartButton->setPalette(pal);
+  connect(m_StartButton, &QPushButton::clicked, this, &MainWindow::onStartClicked);
+  buttonLayout->addWidget(m_StartButton);
+
+  m_StopButton = new QPushButton(tr("Stop"), routingBase);
+  m_StopButton->setFont(fnt);
+  pal.setColor(QPalette::Active, QPalette::Button, QColor(89, 18, 30));
+  m_StopButton->setPalette(pal);
+  m_StopButton->setEnabled(false);
+  connect(m_StopButton, &QPushButton::clicked, this, &MainWindow::onStopClicked);
+  buttonLayout->addWidget(m_StopButton);
 
   QWidget* logBase = new QWidget(splitter);
   QGridLayout* logLayout = new QGridLayout(logBase);
@@ -2603,7 +2622,7 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
   splitter->addWidget(logBase);
 
   m_LogWidget = new LogWidget(logDepth, logBase);
-  QPalette pal = m_LogWidget->palette();
+  pal = m_LogWidget->palette();
   pal.setColor(QPalette::Window, BG_COLOR.darker(145));
   m_LogWidget->setPalette(pal);
   logLayout->addWidget(m_LogWidget, 0, 0);
@@ -2687,6 +2706,9 @@ void MainWindow::FlushLogQ(EosLog::LOG_Q& logQ)
 
 void MainWindow::Shutdown()
 {
+  m_StartButton->setEnabled(true);
+  m_StopButton->setEnabled(false);
+
   if (m_RouterThread)
   {
     m_RouterThread->Stop();
@@ -2741,6 +2763,8 @@ bool MainWindow::BuildRoutes()
 
     m_RouterThread = new RouterThread(routes, connections, settings, m_ItemStateTable, m_ReconnectDelay);
     m_RouterThread->start();
+    m_StartButton->setEnabled(false);
+    m_StopButton->setEnabled(true);
     return true;
   }
 
@@ -2802,7 +2826,6 @@ bool MainWindow::LoadFile(const QString& path)
   {
     m_Unsaved = false;
     UpdateWindowTitle();
-    BuildRoutes();
     return true;
   }
 
@@ -2876,8 +2899,7 @@ void MainWindow::RestoreLastFile()
   if (Load(path))
   {
     m_FilePath = m_Settings.value(SETTING_LAST_FILE).toString();
-    if (BuildRoutes())
-      m_Unsaved = true;
+    m_Unsaved = true;
   }
 }
 
@@ -2929,7 +2951,6 @@ void MainWindow::onNewFile()
   QFile::setPermissions(path, QFile::WriteOwner);
   QFile::remove(path);
   m_Unsaved = false;
-  BuildRoutes();
   UpdateWindowTitle();
 }
 
@@ -3137,7 +3158,7 @@ bool MainWindow::ResolveUnsaved()
   return true;
 }
 
-void MainWindow::onApplyClicked(bool /*checked*/)
+void MainWindow::onStartClicked(bool /*checked*/)
 {
   Router::ROUTES routes;
   ItemStateTable itemStateTable;
@@ -3159,6 +3180,11 @@ void MainWindow::onApplyClicked(bool /*checked*/)
   }
 
   QTimer::singleShot(1, this, &MainWindow::buildRoutes);
+}
+
+void MainWindow::onStopClicked(bool /*checked*/)
+{
+  Shutdown();
 }
 
 void MainWindow::onMuteToggled(bool incoming, bool checked)

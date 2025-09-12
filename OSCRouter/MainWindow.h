@@ -556,7 +556,8 @@ private slots:
   void onOpenLog();
   void onViewHelp();
   void onAboutHelp();
-  void onApplyClicked(bool checked);
+  void onStartClicked(bool checked);
+  void onStopClicked(bool checked);
   void onMuteToggled(bool incoming, bool checked);
   void onMuteRouteToggled(size_t id, bool checked);
 
@@ -575,6 +576,8 @@ private:
   RoutingWidget* m_RoutingWidget;
   TcpWidget* m_TcpWidget;
   SettingsWidget* m_SettingsWidget;
+  QPushButton* m_StartButton = nullptr;
+  QPushButton* m_StopButton = nullptr;
   RouterThread* m_RouterThread;
   QString m_FilePath;
   bool m_Unsaved;
