@@ -1,0 +1,22 @@
+[---------- Windows ----------]
+
+Build for Visual Studio 2022:
+----------------------------
+1. Run generate_msvc2022_64.bat to generate the Visual Studio Solution
+2. Open the Visual Studio Solution file: build\OSCRouter.sln
+3. Rebuild All with Configuration: RelWithDebInfo
+
+Build for Visual Studio Code:
+----------------------------
+1. Open the OSCRouter folder directly in Visual Studio Code
+
+[---------- macOS ----------]
+
+Build:
+-----
+1. Terminal: chmod +x generate_xcode.command
+2. Run generate_xcode.command to generate the XCode Project
+2. Open the XCode project file: build\OSCRouter.xcodeproj
+3. Change project to "OSCRouter" app
+4. Product > Scheme > Edit Scheme... Archive > Build Configuration = RelWithDebInfo
+5. Product > Archive
