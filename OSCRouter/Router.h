@@ -165,6 +165,7 @@ public:
   {
     QString sACNIP;
     QString artNetIP;
+    bool levelChangesOnly = false;
   };
 
   typedef std::vector<sRoute> ROUTES;
@@ -402,9 +403,15 @@ public:
     QElapsedTimer timer;
   };
 
-  typedef std::unordered_map<uint8_t, ArtNetSendUniverse> ARTNET_SEND_UNIVERSE_LIST;
+  struct ArtNetRecvUniverse
+  {
+    artnet_node node = nullptr;
+    std::array<uint8_t, ARTNET_DMX_LENGTH> prevDMX;
+    bool hasPrevDMX = false;
+  };
 
-  typedef std::unordered_map<uint8_t, artnet_node> ARTNET_RECV_UNIVERSE_LIST;
+  typedef std::unordered_map<uint8_t, ArtNetSendUniverse> ARTNET_SEND_UNIVERSE_LIST;
+  typedef std::unordered_map<uint8_t, ArtNetRecvUniverse> ARTNET_RECV_UNIVERSE_LIST;
   typedef std::unordered_map<artnet_node, /*ip*/ unsigned int> ARTNET_NODE_IP_LIST;
   typedef std::unordered_set<artnet_node> ARTNET_DIRTY_LIST;
 
@@ -468,7 +475,9 @@ protected:
     unsigned int ip = 0;
     std::unordered_set<unsigned int> ips;
     bool hasPerChannelPriority = false;
+    bool hasPrevDMX = false;
     std::array<uint8_t, UNIVERSE_SIZE> dmx;
+    std::array<uint8_t, UNIVERSE_SIZE> prevDMX;
     std::array<uint8_t, UNIVERSE_SIZE> channelPriority;
 
     Universe()

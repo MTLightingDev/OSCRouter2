@@ -338,7 +338,7 @@ class SettingsWidget : public QWidget
   Q_OBJECT
 
 public:
-  SettingsWidget(QWidget* parent = nullptr);
+  SettingsWidget(QSettings& settings, QWidget* parent = nullptr);
 
   void Clear();
   void Load(const QStringList& lines);
@@ -347,11 +347,14 @@ public:
   void SaveSettings(Router::Settings& settings);
 
 private slots:
+  void onAutoStartToggled(bool checked);
   void onCurrentIndexChanged(int index);
 
 private:
+  QSettings& m_Settings;
   QComboBox* m_sACNInterface = nullptr;
   QComboBox* m_ArtNetInterface = nullptr;
+  QCheckBox* m_LevelChangesOnly = nullptr;
 
   void LoadLine(const QString& line, Router::Settings& settings);
 
@@ -597,8 +600,6 @@ private:
   bool Load(const QString& path);
   bool Save(const QString& path);
   bool ResolveUnsaved();
-
-  static void GetDefaultIP(QString& ip);
 };
 
 ////////////////////////////////////////////////////////////////////////////////

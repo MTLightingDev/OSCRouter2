@@ -40,6 +40,7 @@
 #define SETTING_LAST_FILE "LastFile"
 #define SETTING_RECONNECT_DELAY "ReconnectDelay"
 #define SETTING_DISABLE_SYSTEM_IDLE "DisableSystemIdle"
+#define SETTING_AUTO_START "AutoStart"
 #define ACTIVITY_TIMEOUT_MS 300
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -956,17 +957,25 @@ void TcpWidget::UpdateItemState(const ItemStateTable& itemStateTable)
     ItemState::GetStateColor(itemState->state, color);
     row.state->SetColor(color);
 
-    QString name;
-    ItemState::GetStateName(itemState->state, name);
-    row.state->setToolTip(name);
-
-    if (itemState->state != ItemState::STATE_UNINITIALIZED)
+    if (itemState->state == ItemState::STATE_UNINITIALIZED)
+    {
+      row.state->setToolTip(tr("Status"));
+      row.state->Deactivate();
+      row.activity->Deactivate();
+      row.activity->SetColor(MUTED_COLOR);
+    }
+    else
+    {
+      QString name;
+      ItemState::GetStateName(itemState->state, name);
+      row.state->setToolTip(name);
       row.state->Activate(0);
 
-    if (itemState->activity)
-    {
-      row.activity->SetColor(ACTIVITY_COLOR);
-      row.activity->Activate(ACTIVITY_TIMEOUT_MS);
+      if (itemState->activity)
+      {
+        row.activity->SetColor(ACTIVITY_COLOR);
+        row.activity->Activate(ACTIVITY_TIMEOUT_MS);
+      }
     }
   }
 }
@@ -1077,14 +1086,22 @@ bool TcpWidget::HasConnection(const Router::CONNECTIONS& connections, const EosA
 
 ////////////////////////////////////////////////////////////////////////////////
 
-SettingsWidget::SettingsWidget(QWidget* parent /*= nullptr*/)
+SettingsWidget::SettingsWidget(QSettings& settings, QWidget* parent /*= nullptr*/)
   : QWidget(parent)
+  , m_Settings(settings)
 {
   setAutoFillBackground(true);
 
   QGridLayout* grid = new QGridLayout(this);
   grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
   int row = 0;
+
+  grid->addWidget(new QLabel(tr("Auto Start"), this), row, 0);
+  QCheckBox* checkbox = new QCheckBox(this);
+  checkbox->setChecked(m_Settings.value(SETTING_AUTO_START).toBool());
+  connect(checkbox, &QCheckBox::toggled, this, &SettingsWidget::onAutoStartToggled);
+  grid->addWidget(checkbox, row, 1);
+  ++row;
 
   grid->addWidget(new QLabel(tr("sACN Interface"), this), row, 0);
   m_sACNInterface = new QComboBox(this);
@@ -1096,6 +1113,15 @@ SettingsWidget::SettingsWidget(QWidget* parent /*= nullptr*/)
   m_ArtNetInterface = new QComboBox(this);
   connect(m_ArtNetInterface, &QComboBox::currentIndexChanged, this, &SettingsWidget::onCurrentIndexChanged);
   grid->addWidget(m_ArtNetInterface, row, 1);
+  ++row;
+
+  QLabel* label = new QLabel(tr("sACN & Artnet: Level Changes Only"), this);
+  label->setToolTip(tr("Only act upon incoming sACN & ArtNet when a level in the universe changes"));
+  grid->addWidget(label, row, 0);
+  m_LevelChangesOnly = new QCheckBox(this);
+  m_LevelChangesOnly->setToolTip(label->toolTip());
+  grid->addWidget(m_LevelChangesOnly, row, 1);
+  ++row;
 
   Clear();
 }
@@ -1127,10 +1153,12 @@ void SettingsWidget::LoadLine(const QString& line, Router::Settings& settings)
   QStringList items;
   FileUtils::GetItemsFromQuotedString(line, items);
 
-  if (items.size() == 3 && items[0].compare(QLatin1String("Settings"), Qt::CaseInsensitive) == 0)
+  if (items.size() >= 3 && items[0].compare(QLatin1String("Settings"), Qt::CaseInsensitive) == 0)
   {
     settings.sACNIP = items[1];
     settings.artNetIP = items[2];
+    if (items.size() > 3)
+      settings.levelChangesOnly = items[3].toInt() != 0;
   }
 }
 
@@ -1139,6 +1167,7 @@ void SettingsWidget::LoadSettings(const Router::Settings& settings)
   Clear();
   SetInterface(m_sACNInterface, settings.sACNIP);
   SetInterface(m_ArtNetInterface, settings.artNetIP);
+  m_LevelChangesOnly->setChecked(settings.levelChangesOnly);
 }
 
 void SettingsWidget::Save(QTextStream& stream)
@@ -1146,13 +1175,14 @@ void SettingsWidget::Save(QTextStream& stream)
   Router::Settings settings;
   SaveSettings(settings);
 
-  stream << QStringLiteral("Settings,%1,%2\n").arg(FileUtils::QuotedString(settings.sACNIP)).arg(FileUtils::QuotedString(settings.artNetIP));
+  stream << QStringLiteral("Settings,%1,%2,%3\n").arg(FileUtils::QuotedString(settings.sACNIP)).arg(FileUtils::QuotedString(settings.artNetIP)).arg(settings.levelChangesOnly ? 1 : 0);
 }
 
 void SettingsWidget::SaveSettings(Router::Settings& settings)
 {
   settings.sACNIP = GetInterface(m_sACNInterface);
   settings.artNetIP = GetInterface(m_ArtNetInterface);
+  settings.levelChangesOnly = m_LevelChangesOnly->isChecked();
 }
 
 void SettingsWidget::PopulateInterfaces(QComboBox* combo, const QString& defaultText)
@@ -1216,6 +1246,11 @@ void SettingsWidget::SetInterface(QComboBox* combo, const QString& ip)
     combo->setItemData(index, ERROR_COLOR, Qt::ForegroundRole);
     combo->setCurrentIndex(index);
   }
+}
+
+void SettingsWidget::onAutoStartToggled(bool checked)
+{
+  m_Settings.setValue(SETTING_AUTO_START, checked);
 }
 
 void SettingsWidget::onCurrentIndexChanged(int index)
@@ -1860,17 +1895,25 @@ void RoutingWidget::UpdateItemState(const ItemState* itemState, Indicator& state
   ItemState::GetStateColor(itemState->state, color);
   stateIndicator.SetColor(color);
 
-  QString name;
-  ItemState::GetStateName(itemState->state, name);
-  stateIndicator.setToolTip(name);
-
-  if (itemState->state != ItemState::STATE_UNINITIALIZED)
+  if (itemState->state == ItemState::STATE_UNINITIALIZED)
+  {
+    stateIndicator.setToolTip(tr("Status"));
+    stateIndicator.Deactivate();
+    activityIndicator.Deactivate();
+    activityIndicator.SetColor(MUTED_COLOR);
+  }
+  else
+  {
+    QString name;
+    ItemState::GetStateName(itemState->state, name);
+    stateIndicator.setToolTip(name);
     stateIndicator.Activate(0);
 
-  if (itemState->activity)
-  {
-    activityIndicator.SetColor(ACTIVITY_COLOR);
-    activityIndicator.Activate(ACTIVITY_TIMEOUT_MS);
+    if (itemState->activity)
+    {
+      activityIndicator.SetColor(ACTIVITY_COLOR);
+      activityIndicator.Activate(ACTIVITY_TIMEOUT_MS);
+    }
   }
 }
 
@@ -2590,7 +2633,7 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
   m_TcpWidget = new TcpWidget(tabs);
   tabs->addTab(m_TcpWidget, tr("TCP"));
 
-  m_SettingsWidget = new SettingsWidget(tabs);
+  m_SettingsWidget = new SettingsWidget(m_Settings, tabs);
   tabs->addTab(m_SettingsWidget, tr("Settings"));
 
   QHBoxLayout* buttonLayout = new QHBoxLayout();
@@ -2775,32 +2818,6 @@ bool MainWindow::BuildRoutes()
   return false;
 }
 
-void MainWindow::GetDefaultIP(QString& ip)
-{
-  QHostAddress localHostAddr(QHostAddress::LocalHost);
-
-  QList<QNetworkInterface> nics = QNetworkInterface::allInterfaces();
-  for (QList<QNetworkInterface>::const_iterator i = nics.begin(); i != nics.end(); i++)
-  {
-    const QNetworkInterface& net = *i;
-    if (net.isValid() && net.flags().testFlag(QNetworkInterface::IsUp) && net.flags().testFlag(QNetworkInterface::IsRunning))
-    {
-      QList<QNetworkAddressEntry> addrs = net.addressEntries();
-      for (QList<QNetworkAddressEntry>::const_iterator j = addrs.begin(); j != addrs.end(); j++)
-      {
-        QHostAddress addr = j->ip();
-        if (!addr.isNull() && addr.protocol() == QAbstractSocket::IPv4Protocol && addr != localHostAddr)
-        {
-          ip = addr.toString();
-          return;
-        }
-      }
-    }
-  }
-
-  ip = localHostAddr.toString();
-}
-
 void MainWindow::GetPersistentSavePath(QString& path) const
 {
   path = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).absoluteFilePath("save.osc.txt");
@@ -2893,20 +2910,29 @@ bool MainWindow::Save(const QString& path)
 
 void MainWindow::RestoreLastFile()
 {
+  bool loaded = false;
+
   QString path = m_Settings.value(SETTING_LAST_FILE).toString();
   if (!path.isEmpty())
   {
     if (LoadFile(path))
-      return;  // success
+      loaded = true;
   }
 
-  // fall-back to loading persistent file
-  GetPersistentSavePath(path);
-  if (Load(path))
+  if (!loaded)
   {
-    m_FilePath = m_Settings.value(SETTING_LAST_FILE).toString();
-    m_Unsaved = true;
+    // fall-back to loading persistent file
+    GetPersistentSavePath(path);
+    if (Load(path))
+    {
+      m_FilePath = m_Settings.value(SETTING_LAST_FILE).toString();
+      m_Unsaved = true;
+      loaded = true;
+    }
   }
+
+  if (loaded && m_StartButton->isEnabled() && m_Settings.value(SETTING_AUTO_START).toBool())
+    onStartClicked(false);
 }
 
 void MainWindow::SyncRouterThread(bool logsOnly)

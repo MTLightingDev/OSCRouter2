@@ -118,6 +118,8 @@ void EosUdpInThread::Start(const EosAddr &addr, QString multicastIP, Protocol pr
   Stop();
 
   m_Addr = addr;
+  if (m_Addr.ip.isEmpty())
+    m_Addr.ip = QLatin1String("0.0.0.0");
   m_MulticastIP = multicastIP;
   m_Protocol = protocol;
   m_ItemStateTableId = itemStateTableId;
@@ -894,6 +896,8 @@ void EosTcpServerThread::Start(const EosAddr &addr, ItemStateTable::ID itemState
   Stop();
 
   m_Addr = addr;
+  if (m_Addr.ip.isEmpty())
+    m_Addr.ip = QLatin1String("0.0.0.0");
   m_ItemStateTableId = itemStateTableId;
   m_FrameMode = frameMode;
   m_ReconnectDelay = reconnectDelayMS;
@@ -1092,156 +1096,107 @@ void RouterThread::BuildRoutes(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &rou
 
   bool mute = GetMuteAll().incoming;
 
-  // get a list of add network interface addresses
-  std::vector<QNetworkAddressEntry> nics;
-  QList<QNetworkInterface> allNics = QNetworkInterface::allInterfaces();
-  for (QList<QNetworkInterface>::const_iterator i = allNics.begin(); i != allNics.end(); i++)
+  // create TCP threads
+  for (Router::CONNECTIONS::const_iterator i = m_TcpConnections.begin(); i != m_TcpConnections.end(); i++)
   {
-    const QNetworkInterface &nic = *i;
-    if (nic.isValid() && nic.flags().testFlag(QNetworkInterface::IsUp))
+    const Router::sConnection &tcpConnection = *i;
+
+    if (tcpConnection.server)
     {
-      QList<QNetworkAddressEntry> addrs = nic.addressEntries();
-      for (QList<QNetworkAddressEntry>::const_iterator j = addrs.begin(); j != addrs.end(); j++)
+      if (tcpServerThreads.find(tcpConnection.addr) == tcpServerThreads.end())
       {
-        QHostAddress addr = j->ip();
-        if (!addr.isNull() && addr.protocol() == QAbstractSocket::IPv4Protocol)
-          nics.push_back(*j);
+        EosTcpServerThread *thread = new EosTcpServerThread();
+        tcpServerThreads[tcpConnection.addr] = thread;
+        thread->Start(tcpConnection.addr, tcpConnection.itemStateTableId, tcpConnection.frameMode, m_ReconnectDelay);
       }
+    }
+    else if (QHostAddress(tcpConnection.addr.ip).toIPv4Address() != 0 && tcpClientThreads.find(tcpConnection.addr) == tcpClientThreads.end())
+    {
+      EosTcpClientThread *thread = new EosTcpClientThread();
+      tcpClientThreads[tcpConnection.addr] = thread;
+      thread->Start(tcpConnection.addr, tcpConnection.itemStateTableId, tcpConnection.frameMode, m_ReconnectDelay, mute);
     }
   }
 
-  if (!nics.empty())
+  QHostAddress localHost(QHostAddress::LocalHost);
+  for (Router::ROUTES::const_iterator i = m_Routes.begin(); i != m_Routes.end(); i++)
   {
-    // create TCP threads
-    for (Router::CONNECTIONS::const_iterator i = m_TcpConnections.begin(); i != m_TcpConnections.end(); i++)
+    Router::sRoute route(*i);
+    if (!route.enable)
+      continue;
+
+    QHostAddress srcAddr(route.src.addr.ip);
+
+    ROUTES_BY_PORT *routes = &routesByPort;
+
+    // create udp in thread on each network interface if necessary
+    if (route.src.protocol == Protocol::ksACN)
     {
-      const Router::sConnection &tcpConnection = *i;
+      routes = &routesBysACNUniverse;
 
-      if (tcpClientThreads.find(tcpConnection.addr) == tcpClientThreads.end() && tcpServerThreads.find(tcpConnection.addr) == tcpServerThreads.end())
+      if (route.dst.addr.port == 0)
+        route.dst.addr.port = route.src.addr.port;  // no destination port specified, so assume same port as source
+    }
+    else if (route.src.protocol == Protocol::kArtNet)
+    {
+      routes = &routesByArtNetUniverse;
+
+      if (route.dst.addr.port == 0)
+        route.dst.addr.port = route.src.addr.port;  // no destination port specified, so assume same port as source
+    }
+    else
+    {
+      if (udpInThreads.find(route.src.addr) == udpInThreads.end())
       {
-        if (tcpConnection.addr.ip.isEmpty())
-        {
-          EosAddr tcpAddr = tcpConnection.addr;
-          for (std::vector<QNetworkAddressEntry>::const_iterator j = nics.begin(); j != nics.end(); j++)
-          {
-            tcpAddr.ip = j->ip().toString();
-
-            if (tcpConnection.server)
-            {
-              EosTcpServerThread *thread = new EosTcpServerThread();
-              tcpServerThreads[tcpAddr] = thread;
-              thread->Start(tcpAddr, tcpConnection.itemStateTableId, tcpConnection.frameMode, m_ReconnectDelay);
-            }
-            else
-            {
-              EosTcpClientThread *thread = new EosTcpClientThread();
-              tcpClientThreads[tcpAddr] = thread;
-              thread->Start(tcpAddr, tcpConnection.itemStateTableId, tcpConnection.frameMode, m_ReconnectDelay, mute);
-            }
-          }
-        }
-        else if (tcpConnection.server)
-        {
-          EosTcpServerThread *thread = new EosTcpServerThread();
-          tcpServerThreads[tcpConnection.addr] = thread;
-          thread->Start(tcpConnection.addr, tcpConnection.itemStateTableId, tcpConnection.frameMode, m_ReconnectDelay);
-        }
-        else
-        {
-          EosTcpClientThread *thread = new EosTcpClientThread();
-          tcpClientThreads[tcpConnection.addr] = thread;
-          thread->Start(tcpConnection.addr, tcpConnection.itemStateTableId, tcpConnection.frameMode, m_ReconnectDelay, mute);
-        }
+        EosUdpInThread *thread = new EosUdpInThread();
+        udpInThreads[route.src.addr] = thread;
+        thread->Start(route.src.addr, route.src.multicastIP, route.src.protocol, route.srcItemStateTableId, m_ReconnectDelay, mute);
       }
+
+      if (route.dst.addr.port == 0)
+        route.dst.addr.port = route.src.addr.port;  // no destination port specified, so assume same port as source
     }
 
-    QHostAddress localHost(QHostAddress::LocalHost);
-    for (Router::ROUTES::const_iterator i = m_Routes.begin(); i != m_Routes.end(); i++)
+    // create udp out thread if known dst, and not an explicit tcp client
+    if (route.dst.protocol != Protocol::ksACN && route.dst.protocol != Protocol::kArtNet && tcpClientThreads.find(route.dst.addr) == tcpClientThreads.end())
+      CreateUdpOutThread(route.dst.addr, route.dstItemStateTableId, udpOutThreads);
+
+    // add entry to main routing table...
+
+    // sorted 1st by port
+    ROUTES_BY_PORT::iterator portIter = routes->find(route.src.addr.port);
+    if (portIter == routes->end())
     {
-      Router::sRoute route(*i);
-      if (!route.enable)
-        continue;
-
-      QHostAddress srcAddr(route.src.addr.ip);
-
-      ROUTES_BY_PORT *routes = &routesByPort;
-
-      // create udp in thread on each network interface if necessary
-      if (route.src.protocol == Protocol::ksACN)
-      {
-        routes = &routesBysACNUniverse;
-
-        if (route.dst.addr.port == 0)
-          route.dst.addr.port = route.src.addr.port;  // no destination port specified, so assume same port as source
-      }
-      else if (route.src.protocol == Protocol::kArtNet)
-      {
-        routes = &routesByArtNetUniverse;
-
-        if (route.dst.addr.port == 0)
-          route.dst.addr.port = route.src.addr.port;  // no destination port specified, so assume same port as source
-      }
-      else
-      {
-        for (std::vector<QNetworkAddressEntry>::const_iterator j = nics.begin(); j != nics.end(); j++)
-        {
-          EosAddr inAddr(j->ip().toString(), route.src.addr.port);
-          if (udpInThreads.find(inAddr) == udpInThreads.end())
-          {
-            if (route.src.addr.ip.isEmpty() || srcAddr == j->ip() || srcAddr.isInSubnet(j->ip(), j->prefixLength()))
-            {
-              EosUdpInThread *thread = new EosUdpInThread();
-              udpInThreads[inAddr] = thread;
-              thread->Start(inAddr, route.src.multicastIP, route.src.protocol, route.srcItemStateTableId, m_ReconnectDelay, mute);
-            }
-          }
-        }
-
-        if (route.dst.addr.port == 0)
-          route.dst.addr.port = route.src.addr.port;  // no destination port specified, so assume same port as source
-      }
-
-      // create udp out thread if known dst, and not an explicit tcp client
-      if (route.dst.protocol != Protocol::ksACN && route.dst.protocol != Protocol::kArtNet && tcpClientThreads.find(route.dst.addr) == tcpClientThreads.end())
-        CreateUdpOutThread(route.dst.addr, route.dstItemStateTableId, udpOutThreads);
-
-      // add entry to main routing table...
-
-      // sorted 1st by port
-      ROUTES_BY_PORT::iterator portIter = routes->find(route.src.addr.port);
-      if (portIter == routes->end())
-      {
-        ROUTES_BY_IP empty;
-        portIter = routes->insert(ROUTES_BY_PORT_PAIR(route.src.addr.port, empty)).first;
-      }
-
-      // sorted 2nd by ip
-      unsigned int srcIp = route.src.addr.toUInt();
-      ROUTES_BY_IP &routesByIp = portIter->second;
-      ROUTES_BY_IP::iterator ipIter = routesByIp.find(srcIp);
-      if (ipIter == routesByIp.end())
-      {
-        sRoutesByIp empty;
-        ipIter = routesByIp.insert(ROUTES_BY_IP_PAIR(srcIp, empty)).first;
-      }
-
-      // sorted 3rd by path
-      ROUTES_BY_PATH &routesByPath = (route.src.path.contains('*') ? ipIter->second.routesByWildcardPath : ipIter->second.routesByPath);
-      ROUTES_BY_PATH::iterator pathIter = routesByPath.find(route.src.path);
-      if (pathIter == routesByPath.end())
-      {
-        ROUTE_DESTINATIONS empty;
-        pathIter = routesByPath.insert(ROUTES_BY_PATH_PAIR(route.src.path, empty)).first;
-      }
-
-      // add destination
-      ROUTE_DESTINATIONS &destinations = pathIter->second;
-      sRouteDst routeDst;
-      routeDst.dst = route.dst;
-      routeDst.srcItemStateTableId = route.srcItemStateTableId;
-      routeDst.dstItemStateTableId = route.dstItemStateTableId;
-      destinations.push_back(routeDst);
+      ROUTES_BY_IP empty;
+      portIter = routes->insert(ROUTES_BY_PORT_PAIR(route.src.addr.port, empty)).first;
     }
+
+    // sorted 2nd by ip
+    unsigned int srcIp = route.src.addr.toUInt();
+    ROUTES_BY_IP &routesByIp = portIter->second;
+    ROUTES_BY_IP::iterator ipIter = routesByIp.find(srcIp);
+    if (ipIter == routesByIp.end())
+    {
+      sRoutesByIp empty;
+      ipIter = routesByIp.insert(ROUTES_BY_IP_PAIR(srcIp, empty)).first;
+    }
+
+    // sorted 3rd by path
+    ROUTES_BY_PATH &routesByPath = (route.src.path.contains('*') ? ipIter->second.routesByWildcardPath : ipIter->second.routesByPath);
+    ROUTES_BY_PATH::iterator pathIter = routesByPath.find(route.src.path);
+    if (pathIter == routesByPath.end())
+    {
+      ROUTE_DESTINATIONS empty;
+      pathIter = routesByPath.insert(ROUTES_BY_PATH_PAIR(route.src.path, empty)).first;
+    }
+
+    // add destination
+    ROUTE_DESTINATIONS &destinations = pathIter->second;
+    sRouteDst routeDst;
+    routeDst.dst = route.dst;
+    routeDst.srcItemStateTableId = route.srcItemStateTableId;
+    routeDst.dstItemStateTableId = route.dstItemStateTableId;
+    destinations.push_back(routeDst);
   }
 }
 
@@ -1314,8 +1269,8 @@ void RouterThread::DestroyArtNet(ArtNet &artnet)
 {
   for (ARTNET_RECV_UNIVERSE_LIST::iterator i = artnet.inputs.begin(); i != artnet.inputs.end(); ++i)
   {
-    artnet_stop(i->second);
-    artnet_destroy(i->second);
+    artnet_stop(i->second.node);
+    artnet_destroy(i->second.node);
   }
   artnet.inputs.clear();
 
@@ -1540,7 +1495,7 @@ void RouterThread::BuildArtNet(ROUTES_BY_PORT &routesByPort, ROUTES_BY_PORT &rou
 
       SetItemState(routesByIp, Protocol::kInvalid, ItemState::STATE_CONNECTED);
       m_PrivateLog.AddInfo(QStringLiteral("ArtNet started listening on universe %1").arg(universeNumber).toUtf8().constData());
-      artnet.inputs[universeNumber] = client;
+      artnet.inputs[universeNumber].node = client;
     }
   }
 
@@ -1845,7 +1800,7 @@ bool RouterThread::MakeOSCPacket(ArtNet &artnet, const EosAddr &addr, Protocol p
       if (i != artnet.inputs.end())
       {
         int length = 0;
-        uint8_t *data = artnet_read_dmx(i->second, 0, &length);
+        uint8_t *data = artnet_read_dmx(i->second.node, 0, &length);
         if (data && length > 0)
         {
           universe = data;
@@ -2269,7 +2224,7 @@ bool RouterThread::SendsACN(sACN &sacn, ArtNet &artnet, const EosAddr &addr, Pro
         if (artNetIter != artnet.inputs.end())
         {
           int srcDMXLength = 0;
-          uint8_t *srcDMX = artnet_read_dmx(artNetIter->second, 0, &srcDMXLength);
+          uint8_t *srcDMX = artnet_read_dmx(artNetIter->second.node, 0, &srcDMXLength);
           if (srcDMX)
           {
             for (int i = 0; i < srcDMXLength; ++i)
@@ -2423,7 +2378,7 @@ bool RouterThread::SendArtNet(ArtNet &artnet, const EosAddr &addr, Protocol prot
       if (artNetIter != artnet.inputs.end())
       {
         int srcDMXLength = 0;
-        uint8_t *srcDMX = artnet_read_dmx(artNetIter->second, 0, &srcDMXLength);
+        uint8_t *srcDMX = artnet_read_dmx(artNetIter->second.node, 0, &srcDMXLength);
         if (srcDMX)
         {
           for (int i = 0; i < srcDMXLength; ++i)
@@ -2615,7 +2570,7 @@ void RouterThread::MakeSendPath(ArtNet &artnet, const EosAddr &addr, Protocol pr
                       if (universeIter != artnet.inputs.end())
                       {
                         int length = 0;
-                        uint8_t *data = artnet_read_dmx(universeIter->second, 0, &length);
+                        uint8_t *data = artnet_read_dmx(universeIter->second.node, 0, &length);
                         if (data && srcPathIndex < length)
                           value = data[srcPathIndex];
                       }
@@ -3153,11 +3108,20 @@ void RouterThread::RecvsACN(sACN &sacn, EosUdpInThread::RECV_PORT_Q &recvQ)
   for (UNIVERSE_NUMBER_SET::const_iterator activeIter = activeUniverses.begin(); activeIter != activeUniverses.end(); ++activeIter)
   {
     uint16_t universeNumber = *activeIter;
-    UNIVERSE_LIST::const_iterator universeIter = m_sACNRecv.merged.find(universeNumber);
+    UNIVERSE_LIST::iterator universeIter = m_sACNRecv.merged.find(universeNumber);
     if (universeIter == m_sACNRecv.merged.end())
       continue;
 
-    const Universe &universe = universeIter->second;
+    Universe &universe = universeIter->second;
+    if (m_Settings.levelChangesOnly)
+    {
+      if (universe.hasPrevDMX && universe.dmx == universe.prevDMX)
+        continue;  // no levels changed
+
+      universe.prevDMX = universe.dmx;
+      universe.hasPrevDMX = true;
+    }
+
     recvQ.push_back(EosUdpInThread::sRecvPortPacket(universeNumber, nullptr, 0, universe.ip));
   }
 
@@ -3174,7 +3138,7 @@ void RouterThread::RecvArtNet(ArtNet &artnet, EosUdpInThread::RECV_PORT_Q &recvQ
   recvQ.clear();
 
   for (ARTNET_RECV_UNIVERSE_LIST::const_iterator inputIter = artnet.inputs.begin(); inputIter != artnet.inputs.end(); ++inputIter)
-    artnet_read(inputIter->second, 0);
+    artnet_read(inputIter->second.node, 0);
 
   for (ARTNET_DIRTY_LIST::const_iterator dirtyIter = artnet.dirty.begin(); dirtyIter != artnet.dirty.end(); ++dirtyIter)
   {
@@ -3188,6 +3152,27 @@ void RouterThread::RecvArtNet(ArtNet &artnet, EosUdpInThread::RECV_PORT_Q &recvQ
     ARTNET_NODE_IP_LIST::const_iterator ipIter = artnet.inputIPs.find(*dirtyIter);
     if (ipIter != artnet.inputIPs.end())
       ip = ipIter->second;
+
+    if (m_Settings.levelChangesOnly)
+    {
+      ARTNET_RECV_UNIVERSE_LIST::iterator recvIter = artnet.inputs.find(universeNumber);
+      if (recvIter == artnet.inputs.end())
+        continue;  // no such universe to compare
+
+      ArtNetRecvUniverse &recv = recvIter->second;
+
+      int length = 0;
+      uint8_t *data = artnet_read_dmx(recv.node, 0, &length);
+      if (!data || length < 1)
+        continue;  // no levels to compare
+
+      size_t dmxLength = std::min(recv.prevDMX.size(), static_cast<size_t>(length));
+      if (recv.hasPrevDMX && memcmp(recv.prevDMX.data(), data, dmxLength) == 0)
+        continue;  // no levels changed
+
+      memcpy(recv.prevDMX.data(), data, dmxLength);
+      recv.hasPrevDMX = true;
+    }
 
     recvQ.push_back(EosUdpInThread::sRecvPortPacket(static_cast<uint16_t>(universeNumber), nullptr, 0, ip));
   }
