@@ -2607,8 +2607,6 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
   file->addAction(tr("E&xit"), this, &MainWindow::close);
 
   QMenu* log = menu->addMenu(tr("&Log"));
-  log->addAction(tr("&Clear"), this, &MainWindow::onClearLog);
-  log->addAction(tr("&Open"), this, &MainWindow::onOpenLog);
 
   QMenu* help = menu->addMenu(tr("&Help"));
   help->addAction(tr("&View Help"), this, &MainWindow::onViewHelp);
@@ -2673,6 +2671,9 @@ MainWindow::MainWindow(EosPlatform* platform, QWidget* parent /*=0*/, Qt::Window
   pal.setColor(QPalette::Window, BG_COLOR.darker(145));
   m_LogWidget->setPalette(pal);
   logLayout->addWidget(m_LogWidget, 0, 0);
+
+  log->addAction(tr("&Clear"), m_LogWidget, &LogWidget::clear);
+  log->addAction(tr("&Open"), this, &MainWindow::onOpenLog);
 
   QString version = QLatin1String(VER_PRODUCTNAME_STR) + QLatin1Char(' ') + QLatin1String(VER_PRODUCTVERSION_STR);
   m_Log.AddInfo(version.toUtf8().constData());
@@ -3026,11 +3027,6 @@ void MainWindow::onSaveAsFile()
   QString path = QFileDialog::getSaveFileName(this, tr("Save"), dir, QLatin1String(VER_PRODUCTNAME_STR) + QLatin1Char(' ') + tr("File (*.osc.txt)"));
   if (!path.isEmpty())
     SaveFile(path);
-}
-
-void MainWindow::onClearLog()
-{
-  m_LogWidget->Clear();
 }
 
 void MainWindow::onOpenLog()

@@ -39,15 +39,17 @@ class LogWidget : public QWidget
 public:
   LogWidget(size_t maxLineCount, QWidget *parent);
 
-  virtual void Clear();
   virtual void Log(EosLog::LOG_Q &logQ);
   virtual QSize sizeHint() const { return QSize(400, 150); }
+
+public slots:
+  void clear();
 
 private slots:
   void onVScrollChanged(int value);
   void onHScrollChanged(int value);
-  void ScrollToTop();
-  void ScrollToBottom();
+  void scrollToTop();
+  void scrollToBottom();
 
 protected:
   void contextMenuEvent(QContextMenuEvent *event) override;

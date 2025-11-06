@@ -555,7 +555,6 @@ private slots:
   void onOpenFile();
   void onSaveFile();
   void onSaveAsFile();
-  void onClearLog();
   void onOpenLog();
   void onViewHelp();
   void onAboutHelp();

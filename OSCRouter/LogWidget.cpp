@@ -52,7 +52,7 @@ LogWidget::LogWidget(size_t maxLineCount, QWidget *parent)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void LogWidget::Clear()
+void LogWidget::clear()
 {
   size_t prevNumLines = GetNumLines();
   int prevLineWidth = m_LineWidth;
@@ -298,9 +298,9 @@ void LogWidget::wheelEvent(QWheelEvent *event)
 void LogWidget::contextMenuEvent(QContextMenuEvent *event)
 {
   QMenu menu(this);
-  QAction *clearAction = menu.addAction("Clear Log");
-  QAction *topAction = menu.addAction("Scroll to Top");
-  QAction *bottomAction = menu.addAction("Scroll to Bottom");
+  menu.addAction(tr("Clear Log"), this, &LogWidget::clear);
+  QAction *topAction = menu.addAction(tr("Scroll to Top"), this, &LogWidget::scrollToTop);
+  QAction *bottomAction = menu.addAction(tr("Scroll to Bottom"), this, &LogWidget::scrollToBottom);
 
   if (!m_VScrollBar->isEnabled() || m_VScrollBar->value() == m_VScrollBar->minimum())
     topAction->setEnabled(false);
@@ -308,35 +308,18 @@ void LogWidget::contextMenuEvent(QContextMenuEvent *event)
   if (!m_VScrollBar->isEnabled() || m_VScrollBar->value() == m_VScrollBar->maximum())
     bottomAction->setEnabled(false);
 
-  QAction *chosen = menu.exec(event->globalPos());
-  if (!chosen)
-    return;
-
-  if (chosen == clearAction)
-  {
-    Clear();
-  }
-  else if (chosen == topAction)
-  {
-    ScrollToTop();
-  }
-  else if (chosen == bottomAction)
-  {
-    ScrollToBottom();
-  }
+  menu.exec(event->globalPos());
 }
 
-void LogWidget::ScrollToTop()
+void LogWidget::scrollToTop()
 {
-  m_AutoScroll = false;
   if (m_VScrollBar->isEnabled())
     m_VScrollBar->setValue(m_VScrollBar->minimum());
   update();
 }
 
-void LogWidget::ScrollToBottom()
+void LogWidget::scrollToBottom()
 {
-  m_AutoScroll = true;
   if (m_VScrollBar->isEnabled())
     m_VScrollBar->setValue(m_VScrollBar->maximum());
   update();
