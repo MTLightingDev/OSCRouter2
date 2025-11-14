@@ -8,9 +8,11 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_SUPPRESS_REGENERATION ON)
 
 if(MSVC)
+  add_compile_definitions(__WINDOWS_MM__)
   add_compile_options(/W4 /MP /wd4996)
   set(ENV{QTDIR} "C:/Qt/6.9.2/msvc2022_64")
 elseif(XCODE)
+  add_compile_definitions(__MACOSX_CORE__)
   set(CMAKE_XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf-with-dsym")
   set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO")
   set(CMAKE_XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Manual")
@@ -39,6 +41,7 @@ include_directories(
   "sACN/Network_Common/AsyncSocket"
   "sACN/Network_Common/AsyncSocket/Src"
   "sACN/Network_Common/Tock"
+  "rtmidi"
 )
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -57,6 +60,7 @@ file(GLOB HEADERS
   "sACN/Network_Common/AsyncSocket/*.h"
   "sACN/Network_Common/AsyncSocket/Src/*.h"
   "sACN/Network_Common/Tock/*.h"
+  "rtmidi/*.h"
 )
 
 file(GLOB SOURCES
@@ -68,6 +72,8 @@ file(GLOB SOURCES
   "sACN/ACN/VHD/*.cpp"
   "sACN/Network_Common/ACNTypes/Src/*.cpp"
   "sACN/Network_Common/AsyncSocket/Src/*.cpp"
+  "rtmidi/*.c"
+  "rtmidi/*.cpp"
 )
 
 set(EOS_SYNC_LIBS_SOURCES

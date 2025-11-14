@@ -6,5 +6,6 @@
   <file>images/NetworkOff.svg</file>
   <file>images/CheckBoxOn.svg</file>
   <file>images/CheckBoxOff.svg</file>
+  <file>images/Refresh.svg</file>
 </qresource>
 </RCC>

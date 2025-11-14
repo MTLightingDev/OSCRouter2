@@ -23,6 +23,7 @@
 #include "EosPlatform.h"
 #include "LogWidget.h"
 #include "Version.h"
+#include "RtMidi.h"
 #include <time.h>
 
 #ifdef WIN32
@@ -1129,6 +1130,30 @@ SettingsWidget::SettingsWidget(QSettings& settings, QWidget* parent /*= nullptr*
   m_LevelChangesOnly = new QCheckBox(base);
   m_LevelChangesOnly->setToolTip(label->toolTip());
   grid->addWidget(m_LevelChangesOnly, row, 1);
+  ++row;
+
+  QWidget* cell = new QWidget(base);
+  grid->addWidget(cell, row, 0, Qt::AlignTop);
+  QHBoxLayout* cellLayout = new QHBoxLayout(cell);
+  cellLayout->setContentsMargins(0, 0, 0, 0);
+  cellLayout->setAlignment(Qt::AlignLeft);
+
+  label = new QLabel(tr("MIDI Devices"), cell);
+  cellLayout->addWidget(label);
+  QPushButton* button = new QPushButton(cell);
+  button->setIcon(QIcon(":/qt/etc/images/Refresh.svg"));
+  button->setToolTip(tr("Refresh MIDI Devices"));
+  int buttonSize = button->sizeHint().height();
+  button->setFixedSize(buttonSize, buttonSize);
+  connect(button, &QPushButton::clicked, this, &SettingsWidget::refreshMidiDevices);
+  cellLayout->addWidget(button);
+
+  m_Midi = new QTableWidget(0, static_cast<int>(MidiProp::kCount), base);
+  for (int col = 0; col < m_Midi->columnCount(); ++col)
+    m_Midi->setHorizontalHeaderItem(col, new QTableWidgetItem(MidiPropName(static_cast<MidiProp>(col))));
+  m_Midi->verticalHeader()->hide();
+  m_Midi->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+  grid->addWidget(m_Midi, row, 1);
 
   Clear();
 }
@@ -1255,6 +1280,24 @@ void SettingsWidget::SetInterface(QComboBox* combo, const QString& ip)
   }
 }
 
+QString SettingsWidget::MidiPropName(MidiProp prop)
+{
+  switch (prop)
+  {
+    case MidiProp::kType: return tr("Type");
+    case MidiProp::kName: return tr("Name");
+    case MidiProp::kPort: return tr("Port");
+    default: break;
+  }
+
+  return QString();
+}
+
+void SettingsWidget::showEvent(QShowEvent* event)
+{
+  refreshMidiDevices();
+}
+
 void SettingsWidget::onAutoStartToggled(bool checked)
 {
   m_Settings.setValue(SETTING_AUTO_START, checked);
@@ -1277,6 +1320,66 @@ void SettingsWidget::onCurrentIndexChanged(int index)
   }
 
   combo->setPalette(pal);
+}
+
+void SettingsWidget::refreshMidiDevices()
+{
+  std::vector<RtMidi::Api> apis;
+  RtMidi::getCompiledApi(apis);
+
+  MidiDeviceList devices;
+
+  for (const RtMidi::Api& api : apis)
+  {
+    // midi in
+    {
+      std::unique_ptr<RtMidiIn> midiIn = std::make_unique<RtMidiIn>(api);
+
+      unsigned int portCount = midiIn->getPortCount();
+      for (unsigned int port = 0; port < portCount; ++port)
+      {
+        MidiDevice device;
+        device.props[static_cast<size_t>(MidiProp::kName)] = QString::fromStdString(midiIn->getPortName(port));
+        device.props[static_cast<size_t>(MidiProp::kPort)] = QString::number(port);
+        device.props[static_cast<size_t>(MidiProp::kType)] = tr("Input");
+        devices.push_back(device);
+      }
+    }
+
+    // midi out
+    {
+      std::unique_ptr<RtMidiOut> midiOut = std::make_unique<RtMidiOut>(api);
+
+      unsigned int portCount = midiOut->getPortCount();
+      for (unsigned int port = 0; port < portCount; ++port)
+      {
+        midiOut->getPortName(port);
+        MidiDevice device;
+        device.props[static_cast<size_t>(MidiProp::kName)] = QString::fromStdString(midiOut->getPortName(port));
+        device.props[static_cast<size_t>(MidiProp::kPort)] = QString::number(port);
+        device.props[static_cast<size_t>(MidiProp::kType)] = tr("Output");
+        devices.push_back(device);
+      }
+    }
+  }
+
+  m_Midi->setRowCount(static_cast<int>(devices.size()));
+  for (int row = 0; row < static_cast<int>(devices.size()); ++row)
+  {
+    const MidiDevice& device = devices[static_cast<size_t>(row)];
+    for (int col = 0; col < static_cast<int>(MidiProp::kCount); ++col)
+    {
+      QTableWidgetItem* item = m_Midi->item(row, col);
+      if (!item)
+      {
+        item = new QTableWidgetItem();
+        item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+        m_Midi->setItem(row, col, item);
+      }
+
+      item->setText(device.props[static_cast<size_t>(col)]);
+    }
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

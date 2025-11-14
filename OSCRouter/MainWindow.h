@@ -346,22 +346,44 @@ public:
   void Save(QTextStream& stream);
   void SaveSettings(Router::Settings& settings);
 
+protected:
+  void showEvent(QShowEvent* event) override;
+
 private slots:
   void onAutoStartToggled(bool checked);
   void onCurrentIndexChanged(int index);
+  void refreshMidiDevices();
 
 private:
+  enum class MidiProp
+  {
+    kType = 0,
+    kName,
+    kPort,
+
+    kCount
+  };
+
+  struct MidiDevice
+  {
+    std::array<QString, static_cast<size_t>(MidiProp::kCount)> props;
+  };
+
+  typedef std::vector<MidiDevice> MidiDeviceList;
+
   QSettings& m_Settings;
   QScrollArea* m_Scroll = nullptr;
   QComboBox* m_sACNInterface = nullptr;
   QComboBox* m_ArtNetInterface = nullptr;
   QCheckBox* m_LevelChangesOnly = nullptr;
+  QTableWidget* m_Midi = nullptr;
 
   void LoadLine(const QString& line, Router::Settings& settings);
 
   static void PopulateInterfaces(QComboBox* combo, const QString& defaultText);
   static QString GetInterface(QComboBox* combo);
   static void SetInterface(QComboBox* combo, const QString& ip);
+  static QString MidiPropName(MidiProp prop);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
