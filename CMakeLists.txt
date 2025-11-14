@@ -192,6 +192,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Gui Qt
 
 if(WIN32)
   target_link_libraries(${PROJECT_NAME} PRIVATE winmm iphlpapi)
+elseif(APPLE)
+  target_link_libraries(${PROJECT_NAME} PRIVATE "-framework CoreMIDI -framework CoreAudio")
 endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
